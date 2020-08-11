@@ -80,7 +80,7 @@ public:
 static void usage(char* exename)
 {
     std::cout << "usage:\n";
-    std::cout << "  " << exename << " [options] -k <bitstream> [processes]\n\n";
+    std::cout << "  " << exename << " [options] -k <bitstream>\n\n";
     std::cout << "  options:\n";
     std::cout << "\t-k <bitstream>, specifying path to xclbin file, mandatory \n";
     std::cout << "\t-b <bulk>, specifying cmd queue length per thread, optional,\n";

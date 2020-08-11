@@ -1,9 +1,9 @@
 CC     = g++
 XILINX_XRT = /opt/xilinx/xrt
-CFLAGS = -g -std=c++14 -Wall -I ${XILINX_XRT}/include 
+CFLAGS = -std=c++14 -Wall -I ${XILINX_XRT}/include 
 LFLAGS = -lstdc++ -lxrt_coreutil -lxrt_core -lrt -luuid -pthread -L ${XILINX_XRT}/lib
 
-OBJ = hello.o
+OBJ = host.o
 
 TGT+=host.exe
 

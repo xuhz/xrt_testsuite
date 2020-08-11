@@ -12,9 +12,9 @@ The test is xrt native API based, having similar overhead to the opencl API base
  
 ## cmdline: 
 ```
->./host.exe -h
+$>./host.exe -h
 usage:
-  ./host.exe [options] -k <bitstream> [processes]
+  ./host.exe [options] -k <bitstream>
 
   options:
 	-k <bitstream>, specifying path to xclbin file, mandatory 
@@ -139,7 +139,7 @@ Max throughput: 47080.6 ops/s
 
 ``` 
 
-### Multiple process test
+### multiple process test
 ```
 $>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m mp -p 4
 
@@ -169,7 +169,7 @@ kernel execution(cmd queue length: 32):
 
 ```
 
-### Multiple thread test
+### multiple thread test
 ```
 $>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m 3 -t 5
 
