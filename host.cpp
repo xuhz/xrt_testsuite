@@ -47,8 +47,17 @@ struct Param {
     int bulk;
     int loop;
     double time;
+    bool latency;
     bool quiet;
     std::string& xclbin_file;
+};
+
+struct Count {
+    bool lat;
+    long min;
+    long max;
+    long avg;
+    long count;
 };
 
 struct MaxT {
@@ -67,8 +76,10 @@ public:
         start = std::chrono::high_resolution_clock::now();
         period = pd*1000;
     }
-    double elapsed() {
+    void stop() {
         end = std::chrono::high_resolution_clock::now();
+    }
+    double elapsed() const {
         return std::chrono::duration<double, std::milli>(end- start).count();
     }
     bool expire() const {
@@ -102,20 +113,69 @@ static void usage(char* exename)
     std::cout << "\t           3|mt:   multiple thread test, run with different threads from 1 to the next of power of 2 of specified\n"; 
     std::cout << "\t                     eg. -t 4, will run 1, 2, 4 threads\n"; 
     std::cout << "\t                     eg. -t 9, will run 1, 2, 4, 8, 16 threads\n"; 
+    std::cout << "\t           4|lat:   latency test, run with specified -b, -n, -t -p\n"; 
     std::cout << "\t-h, help\n\n";
 }
 
-static void printResult(const Param& param, double times, double counts = 0)
+static void saveProcessResult(const Count& count)
 {
-    if (param.quiet)
-        return;
-    double c = counts ? counts : param.processes * param.threads * param.loop;
-	std::cout << "\nkernel execution(cmd queue length: " << param.bulk << "):\n";
-    std::cout <<  "\tprocess(es): " << param.processes << std::endl;
-    std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
-    //std::cout <<  "\tnumber of executions per thread: " << param.loop << std::endl;
-    std::cout <<  "\tthroughput: " << c / times * 1000 << " ops/s (";
-    std::cout << c << " executions in " << times << " ms)" << std::endl;
+    std::string file = TMP;
+    file += std::to_string(getppid());
+    file += "_";
+    file += std::to_string(getpid());
+    file += EXT;
+    if (!boost::filesystem::exists(TMP))
+        boost::filesystem::create_directory(TMP);
+    std::ofstream handle(file);
+    handle << count.min << "\n";
+    handle << count.max << "\n";
+    handle << count.avg << "\n";
+    handle << count.count << "\n";
+    handle.close();
+}
+
+static void saveProcessResult(const Timer& timer, const double total)
+{
+    std::string file = TMP;
+    file += std::to_string(getppid());
+    file += "_";
+    file += std::to_string(getpid());
+    file += EXT;
+    if (!boost::filesystem::exists(TMP))
+        boost::filesystem::create_directory(TMP);
+    std::ofstream handle(file);
+    handle << timer.start.time_since_epoch().count() << "\n";
+    handle << timer.end.time_since_epoch().count() << "\n";
+    handle << total << "\n";
+    handle.close();
+}
+
+static void printResult(const Param& param, const Count& count)
+{
+    if (1/*!param.quiet*/) {
+        std::cout << "\nkernel execution(cmd queue length: " << param.bulk << "):\n";
+        std::cout <<  "\tprocess(es): " << param.processes << std::endl;
+        std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
+        std::cout << "\tLatency:\n";
+        std::cout << "\t\tmin: " << (double)count.min / 1000000 << " ms" << std::endl;
+        std::cout << "\t\tmax: " << (double)count.max / 1000000 << " ms" << std::endl;
+        std::cout << "\t\tavg: " << (double)count.avg / 1000000 << " ms" << std::endl;
+        std::cout << "\t\tcount: " << count.count << std::endl;
+    }
+    saveProcessResult(count); // for multiple process
+}
+static void printResult(const Param& param, const Timer& timer, double counts = 0)
+{
+    if (!param.quiet) {
+        double c = counts ? counts : param.processes * param.threads * param.loop;
+        std::cout << "\nkernel execution(cmd queue length: " << param.bulk << "):\n";
+        std::cout <<  "\tprocess(es): " << param.processes << std::endl;
+        std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
+        //std::cout <<  "\tnumber of executions per thread: " << param.loop << std::endl;
+        std::cout <<  "\tthroughput: " << c / timer.elapsed() * 1000 << " ops/s (";
+        std::cout << c << " executions in " << timer.elapsed() << " ms)" << std::endl;
+    }
+    saveProcessResult(timer, counts); // for multiple process
 }
 
 static void getHostname(char host[256])
@@ -153,22 +213,6 @@ static void saveResult(const Param& param, const MaxT& maxT)
     handle << "-----------------\n";
     handle.close();
 }
- 
-static void saveProcessResult(const Timer& timer, const double total)
-{
-    std::string file = TMP;
-    file += std::to_string(getppid());
-    file += "_";
-    file += std::to_string(getpid());
-    file += EXT;
-    if (!boost::filesystem::exists(TMP))
-        boost::filesystem::create_directory(TMP);
-    std::ofstream handle(file);
-    handle << timer.start.time_since_epoch().count() << "\n";
-    handle << timer.end.time_since_epoch().count() << "\n";
-    handle << total << "\n";
-    handle.close();
-}
 
 /*
  * For multiple process case, the overhead of setup and teardown of a process is not negligible,
@@ -180,7 +224,7 @@ static void saveProcessResult(const Timer& timer, const double total)
 static void handleProcessResult(const Param& param)
 {
     double min = LLONG_MAX, max = LLONG_MIN;
-    double tput = 0;
+    double tput = 0, avg = 0, ttput, tavg;
     boost::filesystem::directory_iterator dir(TMP), end;
     while (dir != end) {
         std::string fn = dir->path().filename().string();
@@ -197,9 +241,16 @@ static void handleProcessResult(const Param& param)
                     std::getline(f, ret);
                     max = std::max(max, std::atof(ret.c_str()));	
                     //std::cout << "max: " << std::atol(ret.c_str()) << std::endl;
-                    std::getline(f, ret);
-                    tput += std::atof(ret.c_str());	
+                    if (param.latency) {
+                        std::getline(f, ret);
+                        tavg = std::atof(ret.c_str());
+                    }
                     //std::cout << "tput: " << std::atof(ret.c_str()) << std::endl;
+                    std::getline(f, ret);
+                    ttput = std::atof(ret.c_str());
+                    if (param.latency)
+                        avg = (avg * tput + tavg * ttput) / (ttput + tput);	
+                    tput += ttput;
                     f.close();
                 }
             }
@@ -209,11 +260,20 @@ static void handleProcessResult(const Param& param)
     }
     if (boost::filesystem::exists(TMP))
         boost::filesystem::remove_all(TMP);
+
     std::cout << "\nkernel execution(cmd queue length: " << param.bulk << "):\n";
     std::cout <<  "\tprocess(es): " << param.processes << std::endl;
     std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
-    std::cout <<  "\tthroughput: " << tput *1000000000 / (max - min) << " ops/s (";
-    std::cout << tput << " executions in " << (max - min)/1000000 << " ms)" << std::endl;
+    if (param.latency) {
+        std::cout << "\tLatency:\n";
+        std::cout << "\t\tmin: " << min/1000000 << " ms" << std::endl;
+        std::cout << "\t\tmax: " << max/1000000 << " ms" << std::endl;
+        std::cout << "\t\tavg: " << avg/1000000 << " ms" << std::endl;
+        std::cout << "\t\tcount: " << tput << std::endl;
+    } else {
+        std::cout <<  "\tthroughput: " << tput *1000000000 / (max - min) << " ops/s (";
+        std::cout << tput << " executions in " << (max - min)/1000000 << " ms)" << std::endl;
+    }
 }
 
 static int make_p2(int n)
@@ -232,6 +292,8 @@ static int get_mode(const char* str)
         return 2;
     if (!strcasecmp(str, "mt"))
         return 3;
+    if (!strcasecmp(str, "lat"))
+        return 4;
     return std::atoi(str);
 }
 
@@ -240,8 +302,6 @@ run_multiple_process(char **argv, char *envp[], const Param& param)
 {
     pid_t pids[param.processes];
     int c, status;
-    //double elapsed;
-    //Timer timer;
 
     for (c = 0; c < param.processes; c++) {
         status = posix_spawn(&pids[c], argv[0], NULL, NULL, argv, envp);
@@ -256,8 +316,6 @@ run_multiple_process(char **argv, char *envp[], const Param& param)
         //std::cout << "process: " << pids[c] << " exited." << std::endl;
     }
 
-    //elapsed = timer.elapsed();
-    //printResult(param, elapsed);
     handleProcessResult(param);
 
     return 0;
@@ -271,13 +329,16 @@ run_multiple_process(char **argv, char *envp[], const Param& param)
  * a loop is used to check all the cmds one by one -- this is not an efficient way though
  */ 
 static void
-thr0(std::vector<xrt::run>&& cmds, int loop, const Timer& timer, double* counts)
+thr0(std::vector<xrt::run>&& cmds, int loop, const Timer& timer, Count& count)
 {
     int issued = 0, completed = 0;
-    uint32_t c;
+    uint32_t c = 0;
+    long stamp[cmds.size()];
     for (auto& cmd : cmds) {
-        cmd.start(); 
-        ++issued;
+        if (count.lat)
+            stamp[c++] = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        cmd.start();
+        issued++;
     }
 
     c = 0;
@@ -287,12 +348,25 @@ thr0(std::vector<xrt::run>&& cmds, int loop, const Timer& timer, double* counts)
             case ERT_CMD_STATE_COMPLETED:
             case ERT_CMD_STATE_ERROR:
             case ERT_CMD_STATE_ABORT:
+            {
+                if (count.lat) {
+                    auto end = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+                    auto delta = end - stamp[c];
+                    stamp[c] = end;
+                    count.min = std::min(count.min, delta);
+                    count.max = std::max(count.max, delta);
+                    count.avg = (delta + count.count * count.avg) / (count.count + 1);
+                }
+                count.count++;
                 completed++;
                 if (!loop || issued < loop) {
+                    if (count.lat)
+                        stamp[c] = std::chrono::high_resolution_clock::now().time_since_epoch().count();
                     cmds[c].start();
                     issued++;
                 }
                 break;
+            }
             default:
                 break;
         }    
@@ -312,7 +386,6 @@ thr0(std::vector<xrt::run>&& cmds, int loop, const Timer& timer, double* counts)
             cmd.wait(); 
         }
     }
-   *counts = completed;
 }
 
 static int run(const Param& param, MaxT& maxT)
@@ -324,12 +397,12 @@ static int run(const Param& param, MaxT& maxT)
     int bulk = std::min(param.bulk, param.loop);
     std::cout << "Test running...(pid: " << getpid() <<")\n";
     std::vector<std::thread> thrs;
-    double elapsed;
 
     /*
      * populate the cmd queue before hand for each thread.
      */  
     std::vector<std::vector<xrt::run>> cmds;
+    std::vector<Count> count;
     for (c = 0; c < param.threads; c++) {
     	std::vector<xrt::run> cmd;
     	for (int i = 0; i < bulk; i++) {
@@ -338,6 +411,7 @@ static int run(const Param& param, MaxT& maxT)
         	cmd.push_back(std::move(run));
     	}
        	cmds.push_back(std::move(cmd));
+        count.push_back(Count{param.latency, LLONG_MAX, LLONG_MIN, 0, 0});
     }
 
     /*
@@ -345,35 +419,44 @@ static int run(const Param& param, MaxT& maxT)
      * counted as the time running the kernel. This impact the accuracy.
      * Better way is, driver has statistics and can be reported by a tool like, custat
      */  
-    double counts[param.threads];
     Timer timer(param.time);
     if (param.threads == 1) {
-        thr0(std::move(cmds[0]), param.time ? 0 : param.loop, timer, &counts[0]);
+        thr0(std::move(cmds[0]), param.time ? 0 : param.loop, timer, count[0]);
     } else {
         for (c = 0; c < param.threads; c++)
-            thrs.emplace_back(&thr0, cmds[c], param.time ? 0 : param.loop, std::ref(timer), &counts[c]);
+            thrs.emplace_back(&thr0, cmds[c], param.time ? 0 : param.loop, std::ref(timer), std::ref(count[c]));
         for (auto& t : thrs)
             t.join();
     }
-    elapsed = timer.elapsed();
+    timer.stop();
 
     double total = 0;
-    for (auto &c: counts)
-        total += c;
+    for (auto &c: count)
+        total += c.count;
     if (!param.time && total != param.threads * param.loop)
         throw std::runtime_error("caculated wrong!! total = " + std::to_string(total));
- 
-    printResult(param, elapsed, total);
-    saveProcessResult(timer, total); // for multiple process
+
+    if (param.latency) {
+        Count ret = {false, LLONG_MAX, LLONG_MIN, 0, 0};
+        for (auto &t : count) {
+            ret.min = std::min(t.min, ret.min);
+            ret.max = std::max(t.max, ret.max);
+            ret.avg = (ret.avg * ret.count + t.avg * t.count) / (ret.count + t.count);
+            ret.count += t.count; 
+        }
+        printResult(param, ret);
+    } else { 
+        printResult(param, timer, total);
     
-    MaxT nmaxT = {
-        param.processes,
-        param.threads,
-        param.bulk,
-        total * 1000 / elapsed,
-    };
-    if (nmaxT.tput > maxT.tput)
-        maxT = std::move(nmaxT);
+        MaxT nmaxT = {
+            param.processes,
+            param.threads,
+            param.bulk,
+            total * 1000 / timer.elapsed(),
+        };
+        if (nmaxT.tput > maxT.tput)
+            maxT = std::move(nmaxT);
+        }
     return 0;
 }
 
@@ -381,6 +464,7 @@ int run(int argc, char** argv, char *envp[])
 {
     std::string xclbin_fnm;
     bool quiet = false;
+    bool lat = false;
     unsigned int device_index = 0;
     int loop = 30000;
     int threads = 1;
@@ -392,7 +476,7 @@ int run(int argc, char** argv, char *envp[])
     std::vector<char *> nargv;
     nargv.push_back(argv[0]);
     
-    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qt:T:")) != -1) {
+    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qt:LT:")) != -1) {
         switch (c)
         {
         case 'b':
@@ -429,13 +513,18 @@ int run(int argc, char** argv, char *envp[])
             processes = std::atoi(optarg);
             break;                      
         case 'm':                       
-            mode = get_mode(optarg);    
+            mode = get_mode(optarg);
+            lat = (mode == 4);
             break;                      
         case 'h':                       
             usage(argv[0]);             
             return 1;                   
         case 'q':                       
             quiet = true;               
+            break;                      
+        case 'L':                       
+            lat = true;               
+            nargv.push_back((char *)"-L");
             break;                      
         default:                        
             usage(argv[0]);             
@@ -449,7 +538,7 @@ int run(int argc, char** argv, char *envp[])
     if (device_index >= xclProbe())                                      
         throw std::runtime_error("Cannot find device index (" + std::to_string(device_index) + ") specified");
   
-    Param param = {device_index, processes, threads, bulk, loop, time, quiet, xclbin_fnm};
+    Param param = {device_index, processes, threads, bulk, loop, time, lat, quiet, xclbin_fnm};
     MaxT maxT = {0};
 
     if (mode == 1) { /*throughput test. one 1 process is being used.*/
@@ -496,6 +585,8 @@ int run(int argc, char** argv, char *envp[])
              * just print the whole instead.
              */  
             nargv.push_back((char *)"-q");
+            if (lat)
+                nargv.push_back((char *)"-L");
             return run_multiple_process(nargv.data(), envp, param);
         }
 
