@@ -25,10 +25,13 @@ usage:
 	           when bulk size is 1, it is ping-pong test
 	-d <index>, specifying index to FPGA device, optional, default is 0
 	-n <count>, specifying number of kernel executions per thread, optional, defualt is 30000
+	-s <bo size>, specifying size of BO, optional, default is 4k
 	-t <threads>, specifying number of threads per process, optional, default is 1
 	-p <processes>, specifying number of processes spawned, optional, default is 1
+	-T <second>, specifying number of second the test will run, exclusive to -n, optional
+	-L if specified, will test latency
 	-m <mode>, optional, default is 0
-	           0:      single run with specified -b, -n, -t, -p
+	           0:      single run with specified -b, -n | -T, -t, -p, -L
 	           1|tput: throughput test, run with different bulk size from 1 ,2, 4, all the way up to 256
 	                   only 1 process will be used in this case
 	           2|mp:   multiple process test, run with different processes from 1 to the next of power of 2 of specified
@@ -37,8 +40,8 @@ usage:
 	           3|mt:   multiple thread test, run with different threads from 1 to the next of power of 2 of specified
 	                     eg. -t 4, will run 1, 2, 4 threads
 	                     eg. -t 9, will run 1, 2, 4, 8, 16 threads
+	           4|dma:  dma test, single run with specified -b, -n | -T, -t, -L, only 1 process will be used
 	-h, help
-
 ```
 ## Examples: 
 
@@ -201,7 +204,66 @@ kernel execution(cmd queue length: 32):
 	throughput: 46799.7 ops/s (240000 executions in 5128.24 ms)
 
 ```
+### latency test
+```
+$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -b 1 -L
+Test running...(pid: 17095)
 
+kernel execution(cmd queue length: 1):
+	process(es): 1
+	thread(s) per process: 1
+	Kernel execution latency:
+		min: 0.072146 ms
+		max: 0.1672 ms
+		avg: 0.093741 ms
+		count: 30000
+
+```
+### dma bandwidth test
+```
+$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m dma -s 64M -n 64
+
+DMA test...
+Test running...(pid: 17131)
+
+DMA write(sz 64M):
+	process(es): 1
+	thread(s) per process: 1
+	DMA write throughput(sz 64M): 10613.8 MB/s (64 transfers in 404.659 ms)
+Test running...(pid: 17131)
+
+DMA read(sz 64M):
+	process(es): 1
+	thread(s) per process: 1
+	DMA read throughput(sz 64M): 10400.5 MB/s (64 transfers in 412.958 ms)
+```
+### dma latency test
+```
+$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m dma -L -T 2 -t 2
+
+DMA test...
+Test running...(pid: 17149)
+
+DMA write(sz 4k):
+	process(es): 1
+	thread(s) per process: 2
+	DMA write latency(sz 4k):
+		min: 0.016832 ms
+		max: 0.68612 ms
+		avg: 0.020242 ms
+		count: 176440
+Test running...(pid: 17149)
+
+DMA read(sz 4k):
+	process(es): 1
+	thread(s) per process: 2
+	DMA read latency(sz 4k):
+		min: 0.016901 ms
+		max: 0.127042 ms
+		avg: 0.020229 ms
+		count: 174844
+
+```
 ## Build
 ```
 $>make clean

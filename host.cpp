@@ -40,6 +40,11 @@
 const std::string csv_file = "data_points.csv";
 const std::string EXT = "xxxxoooo";
 const std::string TMP = "tmpxxxxoooo/";
+#define DEFAULT_COUNT (30000)
+#define DEFAULT_BULK (32)
+static std::atomic<bool> quit{false};
+static size_t get_value(std::string& szStr);
+
 struct Param {
     unsigned int device_index;
     int processes;
@@ -50,14 +55,15 @@ struct Param {
     bool latency;
     bool quiet;
     std::string& xclbin_file;
+    int dir;
+    std::string& bo_sz;
 };
 
 struct Count {
-    bool lat;
     long min;
     long max;
     long avg;
-    long count;
+    size_t count;
 };
 
 struct MaxT {
@@ -88,7 +94,124 @@ public:
     }
 };
 
-static void usage(char* exename)
+class Cmd {
+public:    
+    xrt::kernel kernel;
+    xrt::run cmd;
+    bool lat;
+    xclBOSyncDirection bosync;
+    long stamp = 0;
+    Count count = {LLONG_MAX, LLONG_MIN, 0, 0};
+
+    xrt::bo bo;
+    void *hptr;
+    size_t bo_size;
+
+    Cmd(const xrtDeviceHandle& device, const xrt::kernel& kernel, std::string& szStr,
+       bool latency, int dir) :
+       kernel(kernel), lat(latency), bosync((xclBOSyncDirection)dir)
+    {
+        auto sz = get_value(szStr);
+        bo = xrt::bo(device, sz, 0, kernel.group_id(0));
+        hptr = bo.map();
+        bo_size = sz;
+    }
+
+    void run()
+    {
+        if (bosync == XCL_BO_SYNC_BO_TO_DEVICE || bosync == XCL_BO_SYNC_BO_FROM_DEVICE) {
+            if (lat)
+                stamp = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+            bo.sync(bosync, bo_size, 0);
+            count.count++;
+            if (lat) {
+                auto end = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+                update_lat(end);
+            }
+        } else {
+            if (cmd)
+                cmd.start();
+            else
+                cmd = kernel(bo);
+            
+            if (lat)
+                stamp = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+            }
+    }
+
+    bool done()
+    {
+        if (bosync == XCL_BO_SYNC_BO_TO_DEVICE || bosync == XCL_BO_SYNC_BO_FROM_DEVICE)
+            return true;
+
+        auto state = cmd.wait(1000);
+        switch (state) {
+            case ERT_CMD_STATE_COMPLETED:
+            case ERT_CMD_STATE_ERROR:
+            case ERT_CMD_STATE_ABORT:
+                if (lat) {
+                    auto end = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+                    update_lat(end);
+                }
+                count.count++;
+                return true;
+            default:
+                break;
+        }
+        return false;
+    }
+
+    void wait()
+    {
+        if (bosync == XCL_BO_SYNC_BO_TO_DEVICE || bosync == XCL_BO_SYNC_BO_FROM_DEVICE)
+            return;
+        cmd.wait();
+    }
+
+private:
+    void update_lat(long end)
+    {
+        auto delta = end - stamp;
+        count.min = std::min(count.min, delta);
+        count.max = std::max(count.max, delta);
+        count.avg = (delta + count.count * count.avg) / (count.count + 1);
+    }
+
+};
+
+static size_t get_value(std::string& szStr)
+{
+    char c = szStr.back();
+    if (isdigit(c))
+        return std::atol(szStr.c_str());
+
+    size_t ret = 0;
+    const char *v = szStr.substr(0, szStr.size() - 1).c_str();
+    switch (c) {
+        case 'b':
+        case 'B':
+            ret = std::atol(v);
+            break;
+        case 'k':
+        case 'K':
+            ret = 1024 * std::atol(v);
+            break;
+        case 'm':
+        case 'M':
+            ret = 1024 * 1024 * std::atol(v);
+            break;
+        case 'g':
+        case 'G':
+            ret = 1024 * 1024 * 1024 * std::atol(v);
+            break;
+        default:    
+            throw std::runtime_error("-s input error!");
+    }
+    if (ret > 0x100000000)
+            throw std::runtime_error("-s input too big!!");
+    return ret;
+}
+void usage(char* exename)
 {
     std::cout << "usage:\n";
     std::cout << "  " << exename << " [options] -k <bitstream>\n\n";
@@ -101,10 +224,13 @@ static void usage(char* exename)
     std::cout << "\t           when bulk size is 1, it is ping-pong test\n"; 
     std::cout << "\t-d <index>, specifying index to FPGA device, optional, default is 0\n";
     std::cout << "\t-n <count>, specifying number of kernel executions per thread, optional, defualt is 30000\n";
+    std::cout << "\t-s <bo size>, specifying size of BO, optional, default is 4k\n";
     std::cout << "\t-t <threads>, specifying number of threads per process, optional, default is 1\n";
     std::cout << "\t-p <processes>, specifying number of processes spawned, optional, default is 1\n";
+    std::cout << "\t-T <second>, specifying number of second the test will run, exclusive to -n, optional\n";
+    std::cout << "\t-L if specified, will test latency\n";
     std::cout << "\t-m <mode>, optional, default is 0\n";
-    std::cout << "\t           0:      single run with specified -b, -n, -t, -p\n";
+    std::cout << "\t           0:      single run with specified -b, -n | -T, -t, -p, -L\n";
     std::cout << "\t           1|tput: throughput test, run with different bulk size from 1 ,2, 4, all the way up to 256\n"; 
     std::cout << "\t                   only 1 process will be used in this case\n"; 
     std::cout << "\t           2|mp:   multiple process test, run with different processes from 1 to the next of power of 2 of specified\n"; 
@@ -113,28 +239,11 @@ static void usage(char* exename)
     std::cout << "\t           3|mt:   multiple thread test, run with different threads from 1 to the next of power of 2 of specified\n"; 
     std::cout << "\t                     eg. -t 4, will run 1, 2, 4 threads\n"; 
     std::cout << "\t                     eg. -t 9, will run 1, 2, 4, 8, 16 threads\n"; 
-    std::cout << "\t           4|lat:   latency test, run with specified -b, -n, -t -p\n"; 
+    std::cout << "\t           4|dma:  dma test, single run with specified -b, -n | -T, -t, -L, only 1 process will be used\n";
     std::cout << "\t-h, help\n\n";
 }
 
-static void saveProcessResult(const Count& count)
-{
-    std::string file = TMP;
-    file += std::to_string(getppid());
-    file += "_";
-    file += std::to_string(getpid());
-    file += EXT;
-    if (!boost::filesystem::exists(TMP))
-        boost::filesystem::create_directory(TMP);
-    std::ofstream handle(file);
-    handle << count.min << "\n";
-    handle << count.max << "\n";
-    handle << count.avg << "\n";
-    handle << count.count << "\n";
-    handle.close();
-}
-
-static void saveProcessResult(const Timer& timer, const double total)
+static void saveProcessResult(const Timer& timer, const Count& res)
 {
     std::string file = TMP;
     file += std::to_string(getppid());
@@ -146,36 +255,82 @@ static void saveProcessResult(const Timer& timer, const double total)
     std::ofstream handle(file);
     handle << timer.start.time_since_epoch().count() << "\n";
     handle << timer.end.time_since_epoch().count() << "\n";
-    handle << total << "\n";
+    handle << res.min << "\n";
+    handle << res.max << "\n";
+    handle << res.avg << "\n";
+    handle << res.count << "\n";
     handle.close();
 }
 
-static void printResult(const Param& param, const Count& count)
+static void printResult(const Param& param, const Timer& timer, const std::vector<std::vector<Cmd>>& cmds, MaxT& maxT)
 {
-    if (1/*!param.quiet*/) {
-        std::cout << "\nkernel execution(cmd queue length: " << param.bulk << "):\n";
-        std::cout <<  "\tprocess(es): " << param.processes << std::endl;
-        std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
-        std::cout << "\tLatency:\n";
-        std::cout << "\t\tmin: " << (double)count.min / 1000000 << " ms" << std::endl;
-        std::cout << "\t\tmax: " << (double)count.max / 1000000 << " ms" << std::endl;
-        std::cout << "\t\tavg: " << (double)count.avg / 1000000 << " ms" << std::endl;
-        std::cout << "\t\tcount: " << count.count << std::endl;
+    Count res = {LLONG_MAX, LLONG_MIN, 0, 0};
+    for (auto& t : cmds) {
+        size_t c = 0;
+        for (auto& t1: t) {
+            c += t1.count.count;
+            if (param.latency) {
+                /*
+                std::cout << "min: " << t1.count.min;
+                std::cout << " max " << t1.count.max;
+                std::cout << " avg: " << t1.count.avg;
+                std::cout << " count: " << t1.count.count;
+                std::cout << "\n";
+                */
+                res.min = std::min(res.min, t1.count.min);
+                res.max = std::max(res.max, t1.count.max);
+                res.avg = (res.avg * res.count + t1.count.avg * t1.count.count) / (res.count + t1.count.count);
+            }
+            res.count += t1.count.count;
+        }
+        if (!param.time && c != (size_t)param.loop)
+            throw std::runtime_error("per thread count calculation error");
     }
-    saveProcessResult(count); // for multiple process
-}
-static void printResult(const Param& param, const Timer& timer, double counts = 0)
-{
     if (!param.quiet) {
-        double c = counts ? counts : param.processes * param.threads * param.loop;
-        std::cout << "\nkernel execution(cmd queue length: " << param.bulk << "):\n";
+        if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE)
+            std::cout << "\nDMA write(sz " << param.bo_sz << "):\n";
+        else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE)
+            std::cout << "\nDMA read(sz " << param.bo_sz << "):\n";
+        else
+            std::cout << "\nkernel execution(cmd queue length: " << param.bulk << "):\n";
         std::cout <<  "\tprocess(es): " << param.processes << std::endl;
         std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
-        //std::cout <<  "\tnumber of executions per thread: " << param.loop << std::endl;
-        std::cout <<  "\tthroughput: " << c / timer.elapsed() * 1000 << " ops/s (";
-        std::cout << c << " executions in " << timer.elapsed() << " ms)" << std::endl;
+        if (!param.latency) {
+            if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
+                std::cout << "\tDMA write throughput(sz " << param.bo_sz << "): ";
+                std::cout << res.count * get_value(param.bo_sz) / timer.elapsed() / 1000 << " MB/s (";
+                std::cout << res.count << " transfers in " << timer.elapsed() << " ms)" << std::endl;
+            } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
+                std::cout << "\tDMA read throughput(sz " << param.bo_sz << "): ";
+                std::cout << res.count * get_value(param.bo_sz) / timer.elapsed() / 1000 << " MB/s (";
+                std::cout << res.count << " transfers in " << timer.elapsed() << " ms)" << std::endl;
+            } else {
+                std::cout <<  "\tthroughput: " << res.count / timer.elapsed() / 1000 << " ops/s (";
+                std::cout << res.count << " executions in " << timer.elapsed() << " ms)" << std::endl;
+            }
+        } else {
+            if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE)
+                std::cout << "\tDMA write latency(sz " << param.bo_sz << "):\n";
+            else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE)
+                std::cout << "\tDMA read latency(sz " << param.bo_sz << "):\n";
+            else
+                std::cout << "\tKernel execution latency:\n";
+            std::cout << "\t\tmin: " << (double)res.min / 1000000 << " ms" << std::endl;
+            std::cout << "\t\tmax: " << (double)res.max / 1000000 << " ms" << std::endl;
+            std::cout << "\t\tavg: " << (double)res.avg / 1000000 << " ms" << std::endl;
+            std::cout << "\t\tcount: " << res.count << std::endl;
+        }
     }
-    saveProcessResult(timer, counts); // for multiple process
+    saveProcessResult(timer, res); // for multiple process
+    MaxT nmaxT = {
+        param.processes,
+        param.threads,
+        param.bulk,
+        res.count * 1000 /timer.elapsed(),
+    };
+    if (nmaxT.tput > maxT.tput)
+        maxT = std::move(nmaxT);
+            
 }
 
 static void getHostname(char host[256])
@@ -193,6 +348,8 @@ static void getHostname(char host[256])
  */ 
 static void saveResult(const Param& param, const MaxT& maxT)
 {
+    if (param.latency)
+        return;
     std::ofstream handle(csv_file, std::ofstream::app);
     handle << "----------------------------------------------\n";
     auto t = std::chrono::system_clock::now();
@@ -224,33 +381,45 @@ static void saveResult(const Param& param, const MaxT& maxT)
 static void handleProcessResult(const Param& param)
 {
     double min = LLONG_MAX, max = LLONG_MIN;
-    double tput = 0, avg = 0, ttput, tavg;
+    double count = 0, avg = 0, tcount, tavg;
     boost::filesystem::directory_iterator dir(TMP), end;
     while (dir != end) {
         std::string fn = dir->path().filename().string();
         if (fn.rfind(EXT) != std::string::npos) {
             //std::cout << "fn: " << fn << " pid: " << getpid() << std::endl;
+            /*
+             * contents save in file
+             * 1 timer_start (throughput)
+             * 2 timer_end (throughput) 
+             * 3 lat_min (latency)
+             * 4 lat_max (latency)
+             * 5 lat_avg (latency)
+             * 6 count (throughput, latency)
+             */  
             if (fn.find(std::to_string(getpid()) + "_") != std::string::npos) {
                 std::ifstream f(TMP + fn);
                 if (f.is_open()) {
-                    //std::cout << fn << std::endl;
                     std::string ret;
-                    std::getline(f, ret);
-                    min = std::min(min, std::atof(ret.c_str()));	
-                    //std::cout << "min: " << std::atol(ret.c_str()) << std::endl;
-                    std::getline(f, ret);
-                    max = std::max(max, std::atof(ret.c_str()));	
-                    //std::cout << "max: " << std::atol(ret.c_str()) << std::endl;
-                    if (param.latency) {
-                        std::getline(f, ret);
-                        tavg = std::atof(ret.c_str());
-                    }
-                    //std::cout << "tput: " << std::atof(ret.c_str()) << std::endl;
-                    std::getline(f, ret);
-                    ttput = std::atof(ret.c_str());
+                    std::getline(f, ret); // 1
+                    if (!param.latency)
+                        min = std::min(min, std::atof(ret.c_str()));	
+                    std::getline(f, ret); // 2
+                    if (!param.latency)
+                        max = std::max(max, std::atof(ret.c_str()));	
+                    std::getline(f, ret); // 3
                     if (param.latency)
-                        avg = (avg * tput + tavg * ttput) / (ttput + tput);	
-                    tput += ttput;
+                        min = std::atof(ret.c_str());
+                    std::getline(f, ret); // 4
+                    if (param.latency)
+                        max = std::atof(ret.c_str());
+                    std::getline(f, ret); // 5
+                    if (param.latency)
+                        tavg = std::atof(ret.c_str());
+                    std::getline(f, ret); // 6
+                    tcount = std::atof(ret.c_str());
+                    if (param.latency)
+                        avg = (avg * count + tavg * tcount) / (tcount + count);	
+                    count += tcount;
                     f.close();
                 }
             }
@@ -269,10 +438,10 @@ static void handleProcessResult(const Param& param)
         std::cout << "\t\tmin: " << min/1000000 << " ms" << std::endl;
         std::cout << "\t\tmax: " << max/1000000 << " ms" << std::endl;
         std::cout << "\t\tavg: " << avg/1000000 << " ms" << std::endl;
-        std::cout << "\t\tcount: " << tput << std::endl;
+        std::cout << "\t\tcount: " << count << std::endl;
     } else {
-        std::cout <<  "\tthroughput: " << tput *1000000000 / (max - min) << " ops/s (";
-        std::cout << tput << " executions in " << (max - min)/1000000 << " ms)" << std::endl;
+        std::cout <<  "\tthroughput: " << count *1000000000 / (max - min) << " ops/s (";
+        std::cout << count << " executions in " << (max - min)/1000000 << " ms)" << std::endl;
     }
 }
 
@@ -292,7 +461,7 @@ static int get_mode(const char* str)
         return 2;
     if (!strcasecmp(str, "mt"))
         return 3;
-    if (!strcasecmp(str, "lat"))
+    if (!strcasecmp(str, "dma"))
         return 4;
     return std::atoi(str);
 }
@@ -329,46 +498,23 @@ run_multiple_process(char **argv, char *envp[], const Param& param)
  * a loop is used to check all the cmds one by one -- this is not an efficient way though
  */ 
 static void
-thr0(std::vector<xrt::run>&& cmds, int loop, const Timer& timer, Count& count)
+thr0(std::vector<Cmd>& cmds, int loop, const Timer& timer)
 {
     int issued = 0, completed = 0;
     uint32_t c = 0;
-    long stamp[cmds.size()];
     for (auto& cmd : cmds) {
-        if (count.lat)
-            stamp[c++] = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        cmd.start();
+        cmd.run();
         issued++;
     }
 
     c = 0;
     while (!loop || completed < loop) {
-        auto state = cmds[c].wait(1000);
-        switch (state) {
-            case ERT_CMD_STATE_COMPLETED:
-            case ERT_CMD_STATE_ERROR:
-            case ERT_CMD_STATE_ABORT:
-            {
-                if (count.lat) {
-                    auto end = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-                    auto delta = end - stamp[c];
-                    stamp[c] = end;
-                    count.min = std::min(count.min, delta);
-                    count.max = std::max(count.max, delta);
-                    count.avg = (delta + count.count * count.avg) / (count.count + 1);
-                }
-                count.count++;
+        if (cmds[c].done()) {
                 completed++;
                 if (!loop || issued < loop) {
-                    if (count.lat)
-                        stamp[c] = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-                    cmds[c].start();
+                    cmds[c].run();
                     issued++;
                 }
-                break;
-            }
-            default:
-                break;
         }    
 
         if (++c == cmds.size())
@@ -401,17 +547,14 @@ static int run(const Param& param, MaxT& maxT)
     /*
      * populate the cmd queue before hand for each thread.
      */  
-    std::vector<std::vector<xrt::run>> cmds;
-    std::vector<Count> count;
+    std::vector<std::vector<Cmd>> cmds;
     for (c = 0; c < param.threads; c++) {
-    	std::vector<xrt::run> cmd;
+    	std::vector<Cmd> cmdlist;
     	for (int i = 0; i < bulk; i++) {
-        	auto run = xrt::run(hello);
-        	run.set_arg(0, xrt::bo(device, 32, 0, hello.group_id(0)));
-        	cmd.push_back(std::move(run));
+        	auto cmd = Cmd(device, hello, param.bo_sz, param.latency, param.dir);
+        	cmdlist.push_back(std::move(cmd));
     	}
-       	cmds.push_back(std::move(cmd));
-        count.push_back(Count{param.latency, LLONG_MAX, LLONG_MIN, 0, 0});
+       	cmds.push_back(std::move(cmdlist));
     }
 
     /*
@@ -421,42 +564,17 @@ static int run(const Param& param, MaxT& maxT)
      */  
     Timer timer(param.time);
     if (param.threads == 1) {
-        thr0(std::move(cmds[0]), param.time ? 0 : param.loop, timer, count[0]);
+        thr0(cmds[0], param.time ? 0 : param.loop, timer);
     } else {
         for (c = 0; c < param.threads; c++)
-            thrs.emplace_back(&thr0, cmds[c], param.time ? 0 : param.loop, std::ref(timer), std::ref(count[c]));
+            thrs.emplace_back(&thr0, std::ref(cmds[c]), param.time ? 0 : param.loop, std::ref(timer));
         for (auto& t : thrs)
             t.join();
     }
     timer.stop();
 
-    double total = 0;
-    for (auto &c: count)
-        total += c.count;
-    if (!param.time && total != param.threads * param.loop)
-        throw std::runtime_error("caculated wrong!! total = " + std::to_string(total));
-
-    if (param.latency) {
-        Count ret = {false, LLONG_MAX, LLONG_MIN, 0, 0};
-        for (auto &t : count) {
-            ret.min = std::min(t.min, ret.min);
-            ret.max = std::max(t.max, ret.max);
-            ret.avg = (ret.avg * ret.count + t.avg * t.count) / (ret.count + t.count);
-            ret.count += t.count; 
-        }
-        printResult(param, ret);
-    } else { 
-        printResult(param, timer, total);
+    printResult(param, timer, cmds, maxT);
     
-        MaxT nmaxT = {
-            param.processes,
-            param.threads,
-            param.bulk,
-            total * 1000 / timer.elapsed(),
-        };
-        if (nmaxT.tput > maxT.tput)
-            maxT = std::move(nmaxT);
-        }
     return 0;
 }
 
@@ -466,17 +584,19 @@ int run(int argc, char** argv, char *envp[])
     bool quiet = false;
     bool lat = false;
     unsigned int device_index = 0;
-    int loop = 30000;
+    int loop = DEFAULT_COUNT;
     int threads = 1;
-    int bulk = 32;
+    int bulk = DEFAULT_BULK;
     int processes = 1;
     int c;
     int mode = 0;
     double time = 0;
+    int dir = INT_MAX;
+    std::string boStr = "4k";
     std::vector<char *> nargv;
     nargv.push_back(argv[0]);
     
-    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qt:LT:")) != -1) {
+    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qs:t:LT:")) != -1) {
         switch (c)
         {
         case 'b':
@@ -499,6 +619,11 @@ int run(int argc, char** argv, char *envp[])
             nargv.push_back((char *)"-n");
             nargv.push_back(optarg);
             break;    
+        case 's':
+            boStr = optarg;
+            nargv.push_back((char *)"-s");
+            nargv.push_back(optarg);
+            break;
         case 't':
             threads = std::atoi(optarg);
             nargv.push_back((char *)"-t");
@@ -514,7 +639,6 @@ int run(int argc, char** argv, char *envp[])
             break;                      
         case 'm':                       
             mode = get_mode(optarg);
-            lat = (mode == 4);
             break;                      
         case 'h':                       
             usage(argv[0]);             
@@ -525,6 +649,7 @@ int run(int argc, char** argv, char *envp[])
         case 'L':                       
             lat = true;               
             nargv.push_back((char *)"-L");
+            nargv.push_back((char *)"");
             break;                      
         default:                        
             usage(argv[0]);             
@@ -538,7 +663,7 @@ int run(int argc, char** argv, char *envp[])
     if (device_index >= xclProbe())                                      
         throw std::runtime_error("Cannot find device index (" + std::to_string(device_index) + ") specified");
   
-    Param param = {device_index, processes, threads, bulk, loop, time, lat, quiet, xclbin_fnm};
+    Param param = {device_index, processes, threads, bulk, loop, time, lat, quiet, xclbin_fnm, dir, boStr};
     MaxT maxT = {0};
 
     if (mode == 1) { /*throughput test. one 1 process is being used.*/
@@ -578,6 +703,26 @@ int run(int argc, char** argv, char *envp[])
             param.threads = i;
             run(param, maxT);
         }
+    } else if (mode == 4) { /*dma test*/
+        std::cout << "\nDMA test...\n";
+        param.processes = 1;
+        if (param.loop == DEFAULT_COUNT) {
+            auto sz = get_value(param.bo_sz);
+            if (sz > 0x40000000) //1G
+                param.loop = 1;
+            else if (sz > 0x10000000) //256M
+                param.loop = 16;
+            else if (sz > 0x1000000) //16M
+                param.loop = 64;
+            else if (sz > 0x100000) //1M
+                param.loop = 4096;
+            else
+                param.loop = 10000;
+        }
+        param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+        run(param, maxT);
+        param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+        run(param, maxT);
     } else {
         if (processes > 1) {
             /*
@@ -585,8 +730,6 @@ int run(int argc, char** argv, char *envp[])
              * just print the whole instead.
              */  
             nargv.push_back((char *)"-q");
-            if (lat)
-                nargv.push_back((char *)"-L");
             return run_multiple_process(nargv.data(), envp, param);
         }
 
