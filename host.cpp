@@ -753,8 +753,10 @@ int run(int argc, char** argv, char *envp[])
         showTputResult(param, maxT);
     } else if (mode == 2) { /*multiple process test*/
         std::cout << "\nMultiple process test...\n";
-        if (param.processes == 1)
+        if (param.processes == 1) {
             std::cout << "Warning: -p to specify maximum processes!!!\n\n";
+            param.processes = 8;
+        }
         auto p = make_p2(param.processes);
         if (p != param.processes) {
             std::cout << "Roundup processes to " << p << "(next power of 2)\n";
@@ -766,8 +768,10 @@ int run(int argc, char** argv, char *envp[])
         }
     } else if (mode == 3) { /*multiple thread test*/
         std::cout << "\nMultiple thread test...\n";
-        if (param.threads == 1)
+        if (param.threads == 1) {
             std::cout << "Warning: -t to specify maximum threads!!!\n\n";
+            param.threads = 8;
+        }
         auto t = make_p2(param.threads);
         if (t != param.threads) {
             std::cout << "Roundup threads to " << t << "(next power of 2)\n";
