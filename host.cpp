@@ -254,17 +254,22 @@ void usage(char* exename)
     std::cout << "\t-p <processes>, specifying number of processes spawned, optional, default is 1\n";
     std::cout << "\t-T <second>, specifying number of second the test will run, exclusive to -n, optional\n";
     std::cout << "\t-L if specified, will test latency\n";
+    std::cout << "\t-K <run type> optional, default is 0\n";
+    std::cout << "\t           0|kernel: kernel execution test\n";
+    std::cout << "\t           1|dma: dma test, multiple process is not supported\n";
     std::cout << "\t-m <mode>, optional, default is 0\n";
-    std::cout << "\t           0:      single run with specified -b, -n | -T, -t, -p, -L\n";
-    std::cout << "\t           1|tput: throughput test, run with different bulk size from 1 ,2, 4, all the way up to 256\n"; 
+    std::cout << "\t           0:      single run with specified -b, -n | -T, -t, -p, -L, -K\n";
+    std::cout << "\t           1|tput: throughput test\n"; 
+    std::cout << "\t                   for kernel execution, run with different bulk size from 1 ,2, 4, all the way up to 256\n"; 
+    std::cout << "\t                   for dma test, run with bo size 16m, 64m, 256m\n"; 
     std::cout << "\t                   only 1 process will be used in this case\n"; 
     std::cout << "\t           2|mp:   multiple process test, run with different processes from 1 to the next of power of 2 of specified\n"; 
     std::cout << "\t                     eg. -p 4, will run 1, 2, 4 processes\n"; 
     std::cout << "\t                     eg. -p 9, will run 1, 2, 4, 8, 16 processes\n"; 
+    std::cout << "\t                   dma test doesn't support this mode\n"; 
     std::cout << "\t           3|mt:   multiple thread test, run with different threads from 1 to the next of power of 2 of specified\n"; 
     std::cout << "\t                     eg. -t 4, will run 1, 2, 4 threads\n"; 
     std::cout << "\t                     eg. -t 9, will run 1, 2, 4, 8, 16 threads\n"; 
-    std::cout << "\t           4|dma:  dma test, single run with specified -b, -n | -T, -t, -L, only 1 process will be used\n";
     std::cout << "\t-h, help\n\n";
 }
 
@@ -313,64 +318,68 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
     }
     if (!param.quiet) {
         std::ofstream handle(qor_csv_file, std::ofstream::app);
-        handle << "{";
-        handle << "\"metric\":";
+        std::string line = "{";
+        line += "\"metric\":";
         if (param.mode == 3) {
-            handle << "\"multi thread ";
-        } else {
-            handle << "\"single run ";
+            line += "\"multi thread ";
         }
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
             std::cout << "\nDMA FPGA read ";
-            handle << "DMA FPGA read ";
+            line += "DMA FPGA read ";
         } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
             std::cout << "\nDMA FPGA write ";
-            handle << "DMA FPGA write ";
+            line += "DMA FPGA write ";
         } else {
             std::cout << "\nkernel execution ";
-            handle << "kernel execution ";
+            line += "kernel execution ";
         }
         if (!param.latency) {
             std::cout << "throughput:\n";
-            handle << "throughput\",";
+            line += "throughput\",";
         } else {
             std::cout << "latency:\n";
-            handle << "latency\",";
+            line += "latency\",";
         }
         std::cout <<  "\tprocess(es): " << param.processes << std::endl;
-        handle << "\"process\":" << param.processes << ",";
+        line += "\"process\":" + std::to_string(param.processes) + ",";
         std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
-        handle << "\"thread\":" << param.threads << ",";
+        line += "\"thread\":" + std::to_string(param.threads) + ",";
         if (!param.latency) {
             if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
                 param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
                 std::cout << "\tbo size: " << param.bo_sz << std::endl;
-                handle << "\"bo size\":" << param.bo_sz << ",";
+                line += "\"bo size\":" + param.bo_sz + ",";
                 std::cout << "\tbandwidth: ";
-                handle << "\"bandwidth\":";
+                line += "\"bandwidth MB/s\":";
                 std::cout << res.count * get_value(param.bo_sz) / timer.elapsed() / 1000 << " MB/s (";
                 std::cout << res.count << " transfers in " << timer.elapsed() << " ms)\n";
-                handle <<  res.count * get_value(param.bo_sz) / timer.elapsed() / 1000 << " MB/s"; 
+                line +=  std::to_string(res.count * get_value(param.bo_sz) / timer.elapsed() / 1000); 
             } else {
                 std::cout << "\tqueue length: " << param.bulk << std::endl;
-                handle << "\"queue length\":" << param.bulk << ",";
+                line += "\"queue length\":" + std::to_string(param.bulk) + ",";
                 std::cout << "\tthroughput: ";
-                handle << "\"throughput\":";
+                line += "\"throughput ops/s\":";
                 std::cout << res.count / timer.elapsed() * 1000 << " ops/s (";
                 std::cout << res.count << " executions in " << timer.elapsed() << " ms)\n";
-                handle << res.count / timer.elapsed() * 1000 << " ops/s";
+                line += std::to_string(res.count / timer.elapsed() * 1000);
             }
         } else {
+            if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
+                param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
+                std::cout << "\tbo size: " << param.bo_sz << std::endl;
+                line += "\"bo size\":" + param.bo_sz + ",";
+            }
             std::cout << "\tcount: " << res.count << std::endl;
-            handle << "\"count\":" << res.count << ",";
+            line += "\"count\":" + std::to_string(res.count) + ",";
             std::cout << "\tmin: " << (double)res.min / 1000000 << " ms\n";
-            handle << "\"min\":" << (double)res.min / 1000000 << " ms,";
+            handle << line + "\"min ms\":" + std::to_string((double)res.min / 1000000) + "}\n";
             std::cout << "\tmax: " << (double)res.max / 1000000 << " ms\n";
-            handle << "\"max\":" << (double)res.max / 1000000 << " ms,";
+            handle << line + "\"max ms\":" + std::to_string((double)res.max / 1000000) + "}\n";
             std::cout << "\tavg: " << (double)res.avg / 1000000 << " ms\n";
-            handle << "\"avg\":" << (double)res.avg / 1000000 << " ms";
+            line += "\"avg ms\":" + std::to_string((double)res.avg / 1000000);
         }
-        handle << "}\n";
+        line += "}\n";
+        handle << line;
         handle.close();
     }
     saveProcessResult(timer, res); // for multiple process
@@ -483,38 +492,39 @@ static void handleProcessResult(const Param& param)
         boost::filesystem::remove_all(TMP);
 
     std::ofstream handle(qor_csv_file, std::ofstream::app);
-    handle << "{";
-    handle << "\"metric\":";
+    std::string line = "{";
+    line += "\"metric\":";
     std::cout << "\nmultiple process kernel execution ";
-    handle << "\"multiple process kernel execution ";
+    line += "\"multiple process kernel execution ";
     if (param.latency) {
         std::cout << "latency:\n";
-        handle << "latency\",";
+        line += "latency\",";
     } else {
         std::cout << "throughput:\n";
-        handle << "throughput\",";
+        line += "throughput\",";
     }
     std::cout << "\tprocesses: " << param.processes << std::endl;
-    handle << "\"process\":" << param.processes << ",";
+    line += "\"process\":" + std::to_string(param.processes) + ",";
     std::cout << "\tthread(s) per process: " << param.threads << std::endl;
-    handle << "\"thread\":" << param.threads << ",";
+    line += "\"thread\":" + std::to_string(param.threads) + ",";
     std::cout << "\tcmd queue length: " << param.bulk << std::endl;
-    handle << "\"cmd queue length\":" << param.bulk << ",";
+    line += "\"cmd queue length\":" + std::to_string(param.bulk) + ",";
     if (param.latency) {
         std::cout << "\tcount: " << count << std::endl;
-        handle << "\"count\":" << count << ",";
+        line += "\"count\":" + std::to_string(count) + ",";
         std::cout << "\tmin: " << min/1000000 << " ms\n";
-        handle << "\"min\": " << min/1000000 << " ms,";
+        handle << line + "\"min ms\": " + std::to_string(min/1000000) + "}\n";
         std::cout << "\tmax: " << max/1000000 << " ms\n";
-        handle << "\"max\": " << max/1000000 << " ms,";
+        handle << line + "\"max ms\": " + std::to_string(max/1000000) + "}\n";
         std::cout << "\tavg: " << avg/1000000 << " ms\n";
-        handle << "\"avg\": " << avg/1000000 << " ms";
+        line += "\"avg ms\": " + std::to_string(avg/1000000);
     } else {
         std::cout <<  "\tthroughput: " << count *1000000000 / (max - min) << " ops/s (";
         std::cout << count << " executions in " << (max - min)/1000000 << " ms)\n";
-        handle << "\"throughput\": " <<  count *1000000000 / (max - min) << " ops/s";
+        line += "\"throughput ops/s\": " + std::to_string(count *1000000000 / (max - min));
     }
-    handle << "}\n";
+    line += "}\n";
+    handle << line;
     handle.close();
 }
 
@@ -534,9 +544,34 @@ static int get_mode(const char* str)
         return 2;
     if (!strcasecmp(str, "mt"))
         return 3;
-    if (!strcasecmp(str, "dma"))
-        return 4;
     return std::atoi(str);
+}
+
+static int get_run_type(const char* str)
+{
+    if (!strcasecmp(str, "dma"))
+        return 1;
+    return std::atoi(str);
+}
+
+static void regulate_dma_run_param(Param& param, bool force = false)
+{
+    param.processes = 1;
+    if (force || param.loop == DEFAULT_COUNT) {
+        auto sz = get_value(param.bo_sz);
+        if (sz > 0x40000000) //1G
+            param.loop = 1;
+        else if (sz > 0x10000000) //256M
+            param.loop = 4;
+        else if (sz > 0x4000000) //64M
+            param.loop = 16;
+        else if (sz > 0x1000000) //16M
+            param.loop = 64;
+        else if (sz > 0x100000) //1M
+            param.loop = 1024;
+        else
+            param.loop = 10000;
+    }
 }
 
 static int
@@ -663,13 +698,14 @@ int run(int argc, char** argv, char *envp[])
     int processes = 1;
     int c;
     int mode = 0;
+    int run_type = 0;
     double time = 0;
     int dir = INT_MAX;
     std::string boStr = "4k";
     std::vector<char *> nargv;
     nargv.push_back(argv[0]);
     
-    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qs:t:LT:")) != -1) {
+    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qs:t:LK:T:")) != -1) {
         switch (c)
         {
         case 'b':
@@ -702,6 +738,11 @@ int run(int argc, char** argv, char *envp[])
             nargv.push_back((char *)"-t");
             nargv.push_back(optarg);
             break;
+        case 'K':
+            run_type = get_run_type(optarg);
+            nargv.push_back((char *)"-K");
+            nargv.push_back(optarg);    
+            break;                      
         case 'T':
             time = std::atof(optarg);
             nargv.push_back((char *)"-T");
@@ -739,18 +780,34 @@ int run(int argc, char** argv, char *envp[])
     Param param = {device_index, processes, threads, bulk, loop, time, lat, quiet, xclbin_fnm, dir, boStr, mode};
     MaxT maxT = {0};
 
+    if (run_type == 1 && (mode == 2 || processes > 1))
+        throw std::runtime_error("no multi process DMA test support!");    
+
     if (mode == 1) { /*throughput test. one 1 process is being used.*/
         std::cout << "\nThroughput test...\n";
         param.processes = 1;
         auto t = make_p2(param.threads);
         for (int i = 1; i <= t; i *= 2) {
             param.threads = i;
-            for (int j = 1; j <= 256; j *= 2) {
-                param.bulk = j;
-                run(param, maxT);
+            if (run_type == 0) {
+                for (int j = 1; j <= 256; j *= 2) {
+                    param.bulk = j;
+                    run(param, maxT);
+                }
+            } else {
+                std::vector<std::string> sz = {"16m", "64m", "256m"};
+                for (auto& t : sz) {
+                    param.bo_sz = t;
+                    regulate_dma_run_param(param, true);
+                    param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+                    run(param, maxT);
+                    param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+                    run(param, maxT);
+                }
             }
         }
-        showTputResult(param, maxT);
+        if (run_type == 0)
+            showTputResult(param, maxT);
     } else if (mode == 2) { /*multiple process test*/
         std::cout << "\nMultiple process test...\n";
         if (param.processes == 1) {
@@ -778,28 +835,16 @@ int run(int argc, char** argv, char *envp[])
         }
         for (int i = 1; i <= t; i *= 2) {
             param.threads = i;
-            run(param, maxT);
+            if (run_type == 0) {
+                run(param, maxT);
+            } else {
+                regulate_dma_run_param(param);
+                param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+                run(param, maxT);
+                param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+                run(param, maxT);
+            }
         }
-    } else if (mode == 4) { /*dma test*/
-        std::cout << "\nDMA test...\n";
-        param.processes = 1;
-        if (param.loop == DEFAULT_COUNT) {
-            auto sz = get_value(param.bo_sz);
-            if (sz > 0x40000000) //1G
-                param.loop = 1;
-            else if (sz > 0x10000000) //256M
-                param.loop = 16;
-            else if (sz > 0x1000000) //16M
-                param.loop = 64;
-            else if (sz > 0x100000) //1M
-                param.loop = 4096;
-            else
-                param.loop = 10000;
-        }
-        param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
-        run(param, maxT);
-        param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
-        run(param, maxT);
     } else {
         if (processes > 1) {
             /*
@@ -810,7 +855,15 @@ int run(int argc, char** argv, char *envp[])
             return run_multiple_process(nargv.data(), envp, param);
         }
 
-        run(param, maxT);
+        if (run_type == 0) {
+            run(param, maxT);
+        } else {
+            regulate_dma_run_param(param);
+            param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+            run(param, maxT);
+            param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+            run(param, maxT);
+        }
     }
     return 0;
 }

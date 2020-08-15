@@ -221,7 +221,7 @@ kernel execution(cmd queue length: 1):
 ```
 ### dma bandwidth test
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m dma -s 64M -n 64
+$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -K dma -s 64M -n 64
 
 DMA test...
 Test running...(pid: 17131)
@@ -239,7 +239,7 @@ DMA read(sz 64M):
 ```
 ### dma latency test
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m dma -L -T 2 -t 2
+$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -K dma -L -T 2 -t 2
 
 DMA test...
 Test running...(pid: 17149)
