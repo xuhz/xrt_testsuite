@@ -2,11 +2,12 @@
 ## About
 This test program can be used to run 
 
-* Throughput test
+* Kernel execution throughput and latency test
+* DMA bandwidth and latency test
 * Multiple thead test
 * Multiple process test 
-* Single run with specified number of process, thread, executions or period of time, and cmd queue
-* length
+* Single run with specified number of process, thread, executions or period of time, cmd queue
+* length for kernel execution or bo size for DMA, throughput or latency 
 
 The test is xrt native API based, having similar overhead to the opencl API based
  
@@ -29,239 +30,297 @@ usage:
 	-t <threads>, specifying number of threads per process, optional, default is 1
 	-p <processes>, specifying number of processes spawned, optional, default is 1
 	-T <second>, specifying number of second the test will run, exclusive to -n, optional
-	-L if specified, will test latency
+       	-K <run type> optional, default is 0
+	           0|kernel: kernel execution test
+	           1|dma: dma test, multiple process is not supported
 	-m <mode>, optional, default is 0
-	           0:      single run with specified -b, -n | -T, -t, -p, -L
-	           1|tput: throughput test, run with different bulk size from 1 ,2, 4, all the way up to 256
+	           0:      single run with specified -b, -n | -T, -t, -p, -L, -K
+	           1|tput: throughput test
+	                   for kernel execution, run with different bulk size from 1 ,2, 4, all the way up to 256
+	                   for dma test, run with bo size 16m, 64m, 256m
 	                   only 1 process will be used in this case
 	           2|mp:   multiple process test, run with different processes from 1 to the next of power of 2 of specified
 	                     eg. -p 4, will run 1, 2, 4 processes
 	                     eg. -p 9, will run 1, 2, 4, 8, 16 processes
+	                   dma test doesn't support this mode
 	           3|mt:   multiple thread test, run with different threads from 1 to the next of power of 2 of specified
 	                     eg. -t 4, will run 1, 2, 4 threads
 	                     eg. -t 9, will run 1, 2, 4, 8, 16 threads
-	           4|dma:  dma test, single run with specified -b, -n | -T, -t, -L, only 1 process will be used
 	-h, help
+
 ```
 ## Examples: 
 
 ### default run -- 1 process, 1 thread, cmd queue length 32, number of executions 30000
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin 
-Test running...(pid: 6093)
+./host.exe -k /opt/xilinx/dsa/xilinx_u200_xdma_201830_2/test/verify.xclbin 
+Test running...(pid: 11809)
 
-kernel execution(cmd queue length: 32):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 47242.9 ops/s (30000 executions in 635.016 ms)
+	queue length: 32
+	throughput: 95800.1 ops/s (30000 executions in 313.152 ms)
 ```
-### ping-pong test
+### kernel execution ping-pong test -- the cmd will not be issued before the previous cmd is complete
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -b 1
-Test running...(pid: 6151)
+./host.exe -k /opt/xilinx/dsa/xilinx_u200_xdma_201830_2/test/verify.xclbin  -b 1
+Test running...(pid: 11845)
 
-kernel execution(cmd queue length: 1):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 10594.4 ops/s (30000 executions in 2831.7 ms)
-
+	queue length: 1
+	throughput: 16160.4 ops/s (30000 executions in 1856.39 ms)
 ```
 ### run test on device 1, with 2 threads, for 5.1s
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -t 2 -T 5.1 -d 1
-Test running...(pid: 6129)
+./host.exe -k /opt/xilinx/firmware/u25/gen3x8-xdma/base/test/verify.xclbin -d 1 -t 2 -T 5.1
+Test running...(pid: 11897)
 
-kernel execution(cmd queue length: 32):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 2
-	throughput: 46820.2 ops/s (238855 executions in 5101.53 ms)
+	queue length: 32
+	throughput: 77144.4 ops/s (393501 executions in 5100.84 ms)
 
 ```
-### throughput test
+### kernel execution throughput test
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m 1
+./host.exe -k /opt/xilinx/dsa/xilinx_u200_xdma_201830_2/test/verify.xclbin -m tput
 
 Throughput test...
-Test running...(pid: 5978)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 1):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 10341.3 ops/s (30000 executions in 2900.99 ms)
-Test running...(pid: 5978)
+	queue length: 1
+	throughput: 16699.6 ops/s (30000 executions in 1796.45 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 2):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 19315.5 ops/s (30000 executions in 1553.15 ms)
-Test running...(pid: 5978)
+	queue length: 2
+	throughput: 33617.2 ops/s (30000 executions in 892.399 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 4):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 23799.6 ops/s (30000 executions in 1260.52 ms)
-Test running...(pid: 5978)
+	queue length: 4
+	throughput: 59943.7 ops/s (30000 executions in 500.47 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 8):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 30349.4 ops/s (30000 executions in 988.487 ms)
-Test running...(pid: 5978)
+	queue length: 8
+	throughput: 83645.6 ops/s (30000 executions in 358.656 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 16):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 46938.3 ops/s (30000 executions in 639.137 ms)
-Test running...(pid: 5978)
+	queue length: 16
+	throughput: 91367.1 ops/s (30000 executions in 328.346 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 32):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 47080.6 ops/s (30000 executions in 637.205 ms)
-Test running...(pid: 5978)
+	queue length: 32
+	throughput: 96631.2 ops/s (30000 executions in 310.459 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 64):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 46824.6 ops/s (30000 executions in 640.688 ms)
-Test running...(pid: 5978)
+	queue length: 64
+	throughput: 96578.5 ops/s (30000 executions in 310.628 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 128):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 46761.1 ops/s (30000 executions in 641.559 ms)
-Test running...(pid: 5978)
+	queue length: 128
+	throughput: 97048.2 ops/s (30000 executions in 309.125 ms)
+Test running...(pid: 11925)
 
-kernel execution(cmd queue length: 256):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 46748.3 ops/s (30000 executions in 641.735 ms)
+	queue length: 256
+	throughput: 95636.1 ops/s (30000 executions in 313.689 ms)
 
-Max throughput: 47080.6 ops/s
-@ processes: 1 / threads: 1 / cmd queue length: 32
+Max throughput: 97048.2 ops/s
+@ processes: 1 / threads: 1 / cmd queue length: 128
 
 ``` 
 
 ### multiple process test
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m mp -p 4
+./host.exe -k /opt/xilinx/dsa/xilinx_u200_xdma_201830_2/test/verify.xclbin -m mp -p 4
 
 Multiple process test...
-Test running...(pid: 6012)
+Test running...(pid: 11957)
 
-kernel execution(cmd queue length: 32):
-	process(es): 1
+multiple process kernel execution throughput:
+	processes: 1
 	thread(s) per process: 1
-	throughput: 46765.4 ops/s (30000 executions in 641.5 ms)
-Test running...(pid: 6014)
-Test running...(pid: 6015)
+	cmd queue length: 32
+	throughput: 96208.9 ops/s (30000 executions in 311.821 ms)
+Test running...(pid: 11959)
+Test running...(pid: 11960)
 
-kernel execution(cmd queue length: 32):
-	process(es): 2
+multiple process kernel execution throughput:
+	processes: 2
 	thread(s) per process: 1
-	throughput: 46811.6 ops/s (60000 executions in 1281.73 ms)
-Test running...(pid: 6020)
-Test running...(pid: 6021)
-Test running...(pid: 6018)
-Test running...(pid: 6019)
+	cmd queue length: 32
+	throughput: 94065.6 ops/s (60000 executions in 637.853 ms)
+Test running...(pid: 11966)
+Test running...(pid: 11964)
+Test running...(pid: 11967)
+Test running...(pid: 11965)
 
-kernel execution(cmd queue length: 32):
-	process(es): 4
+multiple process kernel execution throughput:
+	processes: 4
 	thread(s) per process: 1
-	throughput: 46797 ops/s (120000 executions in 2564.27 ms)
+	cmd queue length: 32
+	throughput: 81129.5 ops/s (120000 executions in 1479.12 ms)
 
 ```
 
 ### multiple thread test
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -m 3 -t 5
+./host.exe -k /opt/xilinx/dsa/xilinx_u200_xdma_201830_2/test/verify.xclbin -m mt -t 5
 
 Multiple thread test...
 Roundup threads to 8(next power of 2)
-Test running...(pid: 6042)
+Test running...(pid: 11992)
 
-kernel execution(cmd queue length: 32):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 1
-	throughput: 46868.4 ops/s (30000 executions in 640.09 ms)
-Test running...(pid: 6042)
+	queue length: 32
+	throughput: 93466.2 ops/s (30000 executions in 320.972 ms)
+Test running...(pid: 11992)
 
-kernel execution(cmd queue length: 32):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 2
-	throughput: 46794.1 ops/s (60000 executions in 1282.21 ms)
-Test running...(pid: 6042)
+	queue length: 32
+	throughput: 96251.4 ops/s (60000 executions in 623.367 ms)
+Test running...(pid: 11992)
 
-kernel execution(cmd queue length: 32):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 4
-	throughput: 46868.8 ops/s (120000 executions in 2560.34 ms)
-Test running...(pid: 6042)
+	queue length: 32
+	throughput: 97069.1 ops/s (120000 executions in 1236.23 ms)
+Test running...(pid: 11992)
 
-kernel execution(cmd queue length: 32):
+kernel execution throughput:
 	process(es): 1
 	thread(s) per process: 8
-	throughput: 46799.7 ops/s (240000 executions in 5128.24 ms)
+	queue length: 32
+	throughput: 97293.6 ops/s (240000 executions in 2466.76 ms)
 
 ```
-### latency test
+### kernel execution latency test
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -b 1 -L
-Test running...(pid: 17095)
+./host.exe -k /opt/xilinx/dsa/xilinx_u200_xdma_201830_2/test/verify.xclbin -b 1 -L
+Test running...(pid: 12029)
 
-kernel execution(cmd queue length: 1):
+kernel execution latency:
 	process(es): 1
 	thread(s) per process: 1
-	Kernel execution latency:
-		min: 0.072146 ms
-		max: 0.1672 ms
-		avg: 0.093741 ms
-		count: 30000
-
+	queue length: 1
+	count: 30000
+	min: 0.035923 ms
+	max: 0.194254 ms
+	avg: 0.050261 ms
 ```
-### dma bandwidth test
+### dma bandwidth test with 64 64M size BO Sync 
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -K dma -s 64M -n 64
+./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -K dma -s 64m -n 64
+Test running...(pid: 12254)
 
-DMA test...
-Test running...(pid: 17131)
-
-DMA write(sz 64M):
+DMA FPGA read throughput:
 	process(es): 1
 	thread(s) per process: 1
-	DMA write throughput(sz 64M): 10613.8 MB/s (64 transfers in 404.659 ms)
-Test running...(pid: 17131)
+	bo size: 64m
+	bandwidth: 9171.8 MB/s (64 transfers in 468.28 ms)
+Test running...(pid: 12254)
 
-DMA read(sz 64M):
+DMA FPGA write throughput:
 	process(es): 1
 	thread(s) per process: 1
-	DMA read throughput(sz 64M): 10400.5 MB/s (64 transfers in 412.958 ms)
+	bo size: 64m
+	bandwidth: 11214.6 MB/s (64 transfers in 382.98 ms)
 ```
-### dma latency test
+### dma latency test with 4K size BO(default size) Sync in 3 seconds by 2 threads 
 ```
-$>./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -K dma -L -T 2 -t 2
+./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -K dma -L -t 2 -T 3
+Test running...(pid: 12339)
 
-DMA test...
-Test running...(pid: 17149)
-
-DMA write(sz 4k):
+DMA FPGA read latency:
 	process(es): 1
 	thread(s) per process: 2
-	DMA write latency(sz 4k):
-		min: 0.016832 ms
-		max: 0.68612 ms
-		avg: 0.020242 ms
-		count: 176440
-Test running...(pid: 17149)
+	bo size: 4k
+	count: 266538
+	min: 0.014877 ms
+	max: 0.139194 ms
+	avg: 0.019816 ms
+Test running...(pid: 12339)
 
-DMA read(sz 4k):
+DMA FPGA write latency:
 	process(es): 1
 	thread(s) per process: 2
-	DMA read latency(sz 4k):
-		min: 0.016901 ms
-		max: 0.127042 ms
-		avg: 0.020229 ms
-		count: 174844
+	bo size: 4k
+	count: 272743
+	min: 0.015086 ms
+	max: 0.688914 ms
+	avg: 0.019212 ms
+
+```
+### Single run with specified options combination 
+kernel execution throughput with
+    2 process(-p 2), 
+    3 threads each(-t 3),
+    1000 executions each thread(-n 1000),
+    16 cmds sent before checking completion(-b 16), 
+```
+./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -t 3 -p 2 -n 1000 -b 16
+Test running...(pid: 12507)
+Test running...(pid: 12506)
+
+multiple process kernel execution throughput:
+	processes: 2
+	thread(s) per process: 3
+	cmd queue length: 16
+	throughput: 46559.9 ops/s (6000 executions in 128.866 ms)
+
+```
+kernel execution latency (-L) with
+    1 process, 
+    2 threads each(-t 2),
+    3 second(-T 3),
+    ping-pong(-b 1),
+ 
+```
+./host.exe -k /opt/xilinx/dsa/xilinx_u250_xdma_201830_3/test/verify.xclbin -T3 -L -t 2 -b 1
+Test running...(pid: 12529)
+
+kernel execution latency:
+	process(es): 1
+	thread(s) per process: 2
+	queue length: 1
+	count: 57884
+	min: 0.069562 ms
+	max: 0.148273 ms
+	avg: 0.092167 ms
 
 ```
 ## Build

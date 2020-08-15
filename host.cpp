@@ -770,12 +770,14 @@ int run(int argc, char** argv, char *envp[])
             break;                      
         default:                        
             usage(argv[0]);             
-            throw std::runtime_error    ("Unknown option value");
+            throw std::runtime_error("Unknown option value");
         }                               
     }                                   
                                         
-    if (xclbin_fnm.empty())
-        throw std::runtime_error("FAILED_TEST\nNo xclbin specified");    
+    if (xclbin_fnm.empty()) {
+        usage(argv[0]);             
+        throw std::runtime_error("\nNo xclbin specified");    
+    }
                                                                          
     if (device_index >= xclProbe())                                      
         throw std::runtime_error("Cannot find device index (" + std::to_string(device_index) + ") specified");
