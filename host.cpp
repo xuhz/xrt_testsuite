@@ -368,6 +368,9 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
                 param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
                 std::cout << "\tbo size: " << param.bo_sz << std::endl;
                 line += "\"bo size\":" + param.bo_sz + ",";
+            } else {
+                std::cout << "\tqueue length: " << param.bulk << std::endl;
+                line += "\"queue length\":" + std::to_string(param.bulk) + ",";
             }
             std::cout << "\tcount: " << res.count << std::endl;
             line += "\"count\":" + std::to_string(res.count) + ",";
