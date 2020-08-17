@@ -885,7 +885,7 @@ int run(int argc, char** argv, char *envp[])
         nargv.push_back((char *)"-q");
         for (int i = 1; i <= p; i *= 2) {
             param.processes = i;
-            if (param.dir == INT_MAX) {
+            if (param.dir == INT_MAX && param.run_type == 1) {
                 param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
                 nargv.push_back((char *)"-D");
                 nargv.push_back((char *)"0");
@@ -934,7 +934,7 @@ int run(int argc, char** argv, char *envp[])
              * just print the whole instead.
              */  
             nargv.push_back((char *)"-q");
-            if (param.dir == INT_MAX) {
+            if (param.dir == INT_MAX && param.run_type == 1) {
                 param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
                 nargv.push_back((char *)"-D");
                 nargv.push_back((char *)"0");
