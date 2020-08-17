@@ -30,12 +30,11 @@ usage:
 	-t <threads>, specifying number of threads per process, optional, default is 1
 	-p <processes>, specifying number of processes spawned, optional, default is 1
 	-T <second>, specifying number of second the test will run, exclusive to -n, optional
-       	-K <run type> optional, default is 0
-	           0|kernel: kernel execution test
+       	-K <run type> optional, default is 2
 	           1|dma: dma test
+	           2|kernel: kernel execution test
 	-D <dma dir> 0: to device, 1: from device. optional, default is bi-direction
-	-m <mode>, optional, default is 0
-	           0:      single run with specified -b, -n | -T, -t, -p, -L, -K
+	-m <mode>, optional, default is 4
 	           1|tput: throughput test
 	                   for kernel execution, run with different bulk size from 1 ,2, 4, all the way up to 256
 	                   for dma test, run with bo size 16m, 64m, 256m
@@ -47,6 +46,7 @@ usage:
 	           3|mt:   multiple thread test, run with different threads from 1 to the next of power of 2 of specified
 	                     eg. -t 4, will run 1, 2, 4 threads
 	                     eg. -t 9, will run 1, 2, 4, 8, 16 threads
+	           4:      single run with specified -b, -n | -T, -t, -p, -L, -K
 	-h, help
 
 ```
