@@ -58,6 +58,7 @@ struct Param {
     int dir;
     std::string& bo_sz;
     int mode;
+    int run_type;
 };
 
 struct Count {
@@ -254,11 +255,11 @@ void usage(char* exename)
     std::cout << "\t-p <processes>, specifying number of processes spawned, optional, default is 1\n";
     std::cout << "\t-T <second>, specifying number of second the test will run, exclusive to -n, optional\n";
     std::cout << "\t-L if specified, will test latency\n";
-    std::cout << "\t-K <run type> optional, default is 0\n";
-    std::cout << "\t           0|kernel: kernel execution test\n";
-    std::cout << "\t           1|dma: dma test, multiple process is not supported\n";
-    std::cout << "\t-m <mode>, optional, default is 0\n";
-    std::cout << "\t           0:      single run with specified -b, -n | -T, -t, -p, -L, -K\n";
+    std::cout << "\t-K <run type> optional, default is 2\n";
+    std::cout << "\t           1|dma: dma test\n";
+    std::cout << "\t           2|kernel: kernel execution test\n";
+    std::cout << "\t-D <dma dir> 0: to device, 1: from device. optional, default is bi-direction\n";
+    std::cout << "\t-m <mode>, optional, default is 4\n";
     std::cout << "\t           1|tput: throughput test\n"; 
     std::cout << "\t                   for kernel execution, run with different bulk size from 1 ,2, 4, all the way up to 256\n"; 
     std::cout << "\t                   for dma test, run with bo size 16m, 64m, 256m\n"; 
@@ -270,6 +271,7 @@ void usage(char* exename)
     std::cout << "\t           3|mt:   multiple thread test, run with different threads from 1 to the next of power of 2 of specified\n"; 
     std::cout << "\t                     eg. -t 4, will run 1, 2, 4 threads\n"; 
     std::cout << "\t                     eg. -t 9, will run 1, 2, 4, 8, 16 threads\n"; 
+    std::cout << "\t           4:      single run with specified -b, -n | -T, -t, -p, -L, -K\n";
     std::cout << "\t-h, help\n\n";
 }
 
@@ -496,35 +498,62 @@ static void handleProcessResult(const Param& param)
 
     std::ofstream handle(qor_csv_file, std::ofstream::app);
     std::string line = "{";
-    line += "\"metric\":";
-    std::cout << "\nmultiple process kernel execution ";
-    line += "\"multiple process kernel execution ";
-    if (param.latency) {
-        std::cout << "latency:\n";
-        line += "latency\",";
+    line += "\"metric\":multiple process ";
+    if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
+        std::cout << "\nDMA FPGA read ";
+        line += "DMA FPGA read ";
+    } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
+        std::cout << "\nDMA FPGA write ";
+        line += "DMA FPGA write ";
     } else {
+        std::cout << "\nkernel execution ";
+        line += "kernel execution ";
+    }
+    if (!param.latency) {
         std::cout << "throughput:\n";
         line += "throughput\",";
+    } else {
+        std::cout << "latency:\n";
+        line += "latency\",";
     }
-    std::cout << "\tprocesses: " << param.processes << std::endl;
+    std::cout <<  "\tprocess(es): " << param.processes << std::endl;
     line += "\"process\":" + std::to_string(param.processes) + ",";
-    std::cout << "\tthread(s) per process: " << param.threads << std::endl;
+    std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
     line += "\"thread\":" + std::to_string(param.threads) + ",";
-    std::cout << "\tcmd queue length: " << param.bulk << std::endl;
-    line += "\"cmd queue length\":" + std::to_string(param.bulk) + ",";
-    if (param.latency) {
+    if (!param.latency) {
+        if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
+            param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
+            std::cout << "\tbo size: " << param.bo_sz << std::endl;
+            line += "\"bo size\":" + param.bo_sz + ",";
+            std::cout << "\tbandwidth: ";
+            line += "\"bandwidth MB/s\":";
+            std::cout << count * get_value(param.bo_sz) / (max - min) * 1000 << " MB/s (";
+            std::cout << count << " transfers in " << (max - min) / 1000000 << " ms)\n";
+            line +=  std::to_string(count * get_value(param.bo_sz) / (max - min) * 1000); 
+        } else {
+            std::cout << "\tqueue length: " << param.bulk << std::endl;
+            line += "\"queue length\":" + std::to_string(param.bulk) + ",";
+            std::cout <<  "\tthroughput: " << count *1000000000 / (max - min) << " ops/s (";
+            std::cout << count << " executions in " << (max - min)/1000000 << " ms)\n";
+            line += "\"throughput ops/s\": " + std::to_string(count *1000000000 / (max - min));
+        }
+    } else {
+        if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
+            param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
+            std::cout << "\tbo size: " << param.bo_sz << std::endl;
+            line += "\"bo size\":" + param.bo_sz + ",";
+        } else {
+            std::cout << "\tqueue length: " << param.bulk << std::endl;
+            line += "\"queue length\":" + std::to_string(param.bulk) + ",";
+        }
         std::cout << "\tcount: " << count << std::endl;
         line += "\"count\":" + std::to_string(count) + ",";
-        std::cout << "\tmin: " << min/1000000 << " ms\n";
-        handle << line + "\"min ms\": " + std::to_string(min/1000000) + "}\n";
-        std::cout << "\tmax: " << max/1000000 << " ms\n";
-        handle << line + "\"max ms\": " + std::to_string(max/1000000) + "}\n";
-        std::cout << "\tavg: " << avg/1000000 << " ms\n";
-        line += "\"avg ms\": " + std::to_string(avg/1000000);
-    } else {
-        std::cout <<  "\tthroughput: " << count *1000000000 / (max - min) << " ops/s (";
-        std::cout << count << " executions in " << (max - min)/1000000 << " ms)\n";
-        line += "\"throughput ops/s\": " + std::to_string(count *1000000000 / (max - min));
+        std::cout << "\tmin: " << (double)min / 1000000 << " ms\n";
+        handle << line + "\"min ms\":" + std::to_string((double)min / 1000000) + "}\n";
+        std::cout << "\tmax: " << (double)max / 1000000 << " ms\n";
+        handle << line + "\"max ms\":" + std::to_string((double)max / 1000000) + "}\n";
+        std::cout << "\tavg: " << (double)avg / 1000000 << " ms\n";
+        line += "\"avg ms\":" + std::to_string((double)avg / 1000000);
     }
     line += "}\n";
     handle << line;
@@ -554,12 +583,14 @@ static int get_run_type(const char* str)
 {
     if (!strcasecmp(str, "dma"))
         return 1;
+    if (!strcasecmp(str, "kernel"))
+        return 2;
     return std::atoi(str);
 }
 
 static void regulate_dma_run_param(Param& param, bool force = false)
 {
-    param.processes = 1;
+    //param.processes = 1;
     if (force || param.loop == DEFAULT_COUNT) {
         auto sz = get_value(param.bo_sz);
         if (sz > 0x40000000) //1G
@@ -648,11 +679,13 @@ thr0(std::vector<Cmd>& cmds, int loop, const Timer& timer)
 static int run(const Param& param, MaxT& maxT)
 {
     auto device = xrt::device(param.device_index);
+    Timer timer_ld;
     auto uuid = device.load_xclbin(param.xclbin_file);
+    timer_ld.stop();
     auto hello = xrt::kernel(device, uuid.get(), "hello:hello_1");
     int c; 
     int bulk = std::min(param.bulk, param.loop);
-    std::cout << "Test running...(pid: " << getpid() <<")\n";
+    std::cout << "Test running...(pid: " << getpid() <<", xclbin loaded in " << timer_ld.elapsed() << " ms)\n";
     std::vector<std::thread> thrs;
 
     /*
@@ -689,6 +722,37 @@ static int run(const Param& param, MaxT& maxT)
     return 0;
 }
 
+static void
+check_param(const Param& param)
+{
+    if (param.xclbin_file.empty())
+        throw std::runtime_error("\nNo -k specified");    
+                                                                         
+    if (param.device_index >= xclProbe())                                      
+        throw std::runtime_error("\n-d specified error");
+
+    if (param.mode < 1 || param.mode > 4)
+        throw std::runtime_error("\n-m specified error");    
+
+    if (param.run_type < 1 || param.run_type > 2)
+        throw std::runtime_error("\n-K specified error");    
+
+    if (param.dir < 0 || (param.dir > 1 && param.dir != INT_MAX))
+        throw std::runtime_error("\n-D specified error");    
+
+    if (param.processes == 0)
+        throw std::runtime_error("\n-p specified error");    
+
+    if (param.threads == 0)
+        throw std::runtime_error("\n-t specified error");    
+
+    if (param.bulk == 0)
+        throw std::runtime_error("\n-b specified error");    
+
+    if (param.loop == 0)
+        throw std::runtime_error("\n-n specified error");    
+}
+
 int run(int argc, char** argv, char *envp[])
 {
     std::string xclbin_fnm;
@@ -700,15 +764,15 @@ int run(int argc, char** argv, char *envp[])
     int bulk = DEFAULT_BULK;
     int processes = 1;
     int c;
-    int mode = 0;
-    int run_type = 0;
+    int mode = 4;
+    int run_type = 2;
     double time = 0;
     int dir = INT_MAX;
     std::string boStr = "4k";
     std::vector<char *> nargv;
     nargv.push_back(argv[0]);
     
-    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qs:t:LK:T:")) != -1) {
+    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qs:t:D:LK:T:")) != -1) {
         switch (c)
         {
         case 'b':
@@ -768,25 +832,20 @@ int run(int argc, char** argv, char *envp[])
             nargv.push_back((char *)"-L");
             nargv.push_back((char *)"");
             break;                      
+        case 'D':
+            dir = std::atoi(optarg);
+            nargv.push_back((char *)"-D");
+            nargv.push_back(optarg);    
+            break;                      
         default:                        
             usage(argv[0]);             
             throw std::runtime_error("Unknown option value");
         }                               
     }                                   
-                                        
-    if (xclbin_fnm.empty()) {
-        usage(argv[0]);             
-        throw std::runtime_error("\nNo xclbin specified");    
-    }
-                                                                         
-    if (device_index >= xclProbe())                                      
-        throw std::runtime_error("Cannot find device index (" + std::to_string(device_index) + ") specified");
   
-    Param param = {device_index, processes, threads, bulk, loop, time, lat, quiet, xclbin_fnm, dir, boStr, mode};
+    Param param = {device_index, processes, threads, bulk, loop, time, lat, quiet, xclbin_fnm, dir, boStr, mode, run_type};
+    check_param(param);                     
     MaxT maxT = {0};
-
-    if (run_type == 1 && (mode == 2 || processes > 1))
-        throw std::runtime_error("no multi process DMA test support!");    
 
     if (mode == 1) { /*throughput test. one 1 process is being used.*/
         std::cout << "\nThroughput test...\n";
@@ -794,7 +853,7 @@ int run(int argc, char** argv, char *envp[])
         auto t = make_p2(param.threads);
         for (int i = 1; i <= t; i *= 2) {
             param.threads = i;
-            if (run_type == 0) {
+            if (run_type == 2) {
                 for (int j = 1; j <= 256; j *= 2) {
                     param.bulk = j;
                     run(param, maxT);
@@ -811,7 +870,7 @@ int run(int argc, char** argv, char *envp[])
                 }
             }
         }
-        if (run_type == 0)
+        if (run_type == 2)
             showTputResult(param, maxT);
     } else if (mode == 2) { /*multiple process test*/
         std::cout << "\nMultiple process test...\n";
@@ -826,7 +885,21 @@ int run(int argc, char** argv, char *envp[])
         nargv.push_back((char *)"-q");
         for (int i = 1; i <= p; i *= 2) {
             param.processes = i;
-            run_multiple_process(nargv.data(), envp, param);
+            if (param.dir == INT_MAX) {
+                param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+                nargv.push_back((char *)"-D");
+                nargv.push_back((char *)"0");
+                run_multiple_process(nargv.data(), envp, param);
+                nargv.pop_back();
+                nargv.push_back((char *)"1");
+                param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+                run_multiple_process(nargv.data(), envp, param);
+                nargv.pop_back();
+                nargv.pop_back();
+                param.dir = INT_MAX;
+            } else {
+                run_multiple_process(nargv.data(), envp, param);
+            }
         }
     } else if (mode == 3) { /*multiple thread test*/
         std::cout << "\nMultiple thread test...\n";
@@ -840,14 +913,18 @@ int run(int argc, char** argv, char *envp[])
         }
         for (int i = 1; i <= t; i *= 2) {
             param.threads = i;
-            if (run_type == 0) {
+            if (run_type == 2) {
                 run(param, maxT);
             } else {
                 regulate_dma_run_param(param);
-                param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
-                run(param, maxT);
-                param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
-                run(param, maxT);
+                if (param.dir == INT_MAX) {
+                    param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+                    run(param, maxT);
+                    param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+                    run(param, maxT);
+                } else {
+                    run(param, maxT);
+                }
             }
         }
     } else {
@@ -857,17 +934,33 @@ int run(int argc, char** argv, char *envp[])
              * just print the whole instead.
              */  
             nargv.push_back((char *)"-q");
-            return run_multiple_process(nargv.data(), envp, param);
+            if (param.dir == INT_MAX) {
+                param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+                nargv.push_back((char *)"-D");
+                nargv.push_back((char *)"0");
+                run_multiple_process(nargv.data(), envp, param);
+                nargv.pop_back();
+                nargv.push_back((char *)"1");
+                param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+                run_multiple_process(nargv.data(), envp, param);
+            } else {
+                run_multiple_process(nargv.data(), envp, param);
+            }
+            return 0;
         }
 
-        if (run_type == 0) {
+        if (run_type == 2) {
             run(param, maxT);
         } else {
             regulate_dma_run_param(param);
-            param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
-            run(param, maxT);
-            param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
-            run(param, maxT);
+            if (param.dir == INT_MAX) {
+                param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
+                run(param, maxT);
+                param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
+                run(param, maxT);
+            } else {
+                run(param, maxT);
+            }
         }
     }
     return 0;

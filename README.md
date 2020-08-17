@@ -32,7 +32,8 @@ usage:
 	-T <second>, specifying number of second the test will run, exclusive to -n, optional
        	-K <run type> optional, default is 0
 	           0|kernel: kernel execution test
-	           1|dma: dma test, multiple process is not supported
+	           1|dma: dma test
+	-D <dma dir> 0: to device, 1: from device. optional, default is bi-direction
 	-m <mode>, optional, default is 0
 	           0:      single run with specified -b, -n | -T, -t, -p, -L, -K
 	           1|tput: throughput test
