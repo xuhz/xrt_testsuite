@@ -43,6 +43,44 @@ const std::string EXT = "xxxxoooo";
 const std::string TMP = "tmpxxxxoooo/";
 #define DEFAULT_COUNT (30000)
 #define DEFAULT_BULK (32)
+/*
+ * default kernel name is "hello", and we assume in multiple CU and/or multiple
+ * kernel case, the kernels have name "kernel_index", where 'kernel' can be hello
+ * or other name, 'index' is the index of the kernel, starting from 1, the cus
+ * have name "kernelname_index", where 'kernelname' is the name of the kernel the cu
+ * is in, the 'index' is the index of the cu in its kernel, starting from 1.
+ * eg. multiple cu
+ * hello:{hello_1}
+ * hello:{hello_2}
+ * hello:{hello_3}
+ * eg.multiple kernel with one cu per kernel
+ * hello_1:{hello_1_1}
+ * hello_2:{hello_2_1}
+ * hello_3:{hello_3_1}
+ */ 
+const std::string DEF_KNAME = "hello";
+
+enum kernel_cu {
+    KERNEL_CU_ILLEGAL = 0,
+    MULTI_CU_PER_KERNEL = 1,
+    MULTI_KERNEL_WITH_ONE_CU_EACH = 2,
+    ONE_KERNEL_ONE_CU = 3,
+};
+
+enum kernel_run_type {
+    RUN_TYPE_ILLEGAL = 0,
+    RUN_TYPE_DMA = 1,
+    RUN_TYPE_KERNEL = 2,
+};
+
+enum run_mode {
+    MODE_ILLEGAL = 0,
+    MODE_TPUT = 1,
+    MODE_MP = 2,
+    MODE_MT = 3,
+    MODE_SINGLE_RUN = 4,
+};
+
 static size_t get_value(std::string& szStr);
 
 struct Param {
@@ -59,6 +97,8 @@ struct Param {
     std::string& bo_sz;
     int mode;
     int run_type;
+    std::string& kname;
+    int cu_type;
 };
 
 struct Count {
@@ -248,6 +288,14 @@ void usage(char* exename)
     std::cout << "\t           cmd queue length number of cmds will be issued before polling cmd status,\n";
     std::cout << "\t           this is the aka bulk submit, then afterwards, a new cmd will be issued only after one cmd is complete\n";
     std::cout << "\t           when bulk size is 1, it is ping-pong test\n"; 
+    std::cout << "\t-c <kernel cu type>, specifying kernel cu layout, optional, default is 3\n";
+    std::cout << "\t           1|mc: multiple cus in one kernel\n";
+    std::cout << "\t           2|mk: multiple kernels with one cu per kernel\n";
+    std::cout << "\t           3: one kernel with one cu.\n";
+    std::cout << "\t           when mc or mk type is specified, in multile process and/or thread run, each thread will\n";
+    std::cout << "\t           take a different cu\n";
+    std::cout << "\t           with default type, in multile process and/or thread run, each thread will take the default\n";
+    std::cout << "\t           kernel/cu or the one specified by -N\n";
     std::cout << "\t-d <index>, specifying index to FPGA device, optional, default is 0\n";
     std::cout << "\t-n <count>, specifying number of kernel executions per thread, optional, defualt is 30000\n";
     std::cout << "\t-s <bo size>, specifying size of BO, optional, default is 4k\n";
@@ -258,6 +306,9 @@ void usage(char* exename)
     std::cout << "\t-K <run type> optional, default is 2\n";
     std::cout << "\t           1|dma: dma test\n";
     std::cout << "\t           2|kernel: kernel execution test\n";
+    std::cout << "\t-N <kernel/cu name> optional,\n";
+    std::cout << "\t            default for one cu per kernel is \"hello:{hello_1}\"\n";
+    std::cout << "\t            default for multiple cu per kernel is \"hello_1:{hello_1_1}\"\n";
     std::cout << "\t-D <dma dir> 0: to device, 1: from device. optional, default is bi-direction\n";
     std::cout << "\t-m <mode>, optional, default is 4\n";
     std::cout << "\t           1|tput: throughput test\n"; 
@@ -322,7 +373,7 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
         std::ofstream handle(qor_csv_file, std::ofstream::app);
         std::string line = "{";
         line += "\"metric\":";
-        if (param.mode == 3) {
+        if (param.mode == MODE_MT) {
             line += "\"multi thread ";
         }
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
@@ -571,20 +622,29 @@ static int make_p2(int n)
 static int get_mode(const char* str)
 {
     if (!strcasecmp(str, "tput"))
-        return 1;
+        return MODE_TPUT;
     if (!strcasecmp(str, "mp"))
-        return 2;
+        return MODE_MP;
     if (!strcasecmp(str, "mt"))
-        return 3;
+        return MODE_MT;
     return std::atoi(str);
 }
 
 static int get_run_type(const char* str)
 {
     if (!strcasecmp(str, "dma"))
-        return 1;
+        return RUN_TYPE_DMA;
     if (!strcasecmp(str, "kernel"))
-        return 2;
+        return RUN_TYPE_KERNEL;
+    return std::atoi(str);
+}
+
+static int get_cu_type(const char* str)
+{
+    if (!strcasecmp(str, "mc"))
+        return MULTI_CU_PER_KERNEL;
+    if (!strcasecmp(str, "mk"))
+        return MULTI_KERNEL_WITH_ONE_CU_EACH;
     return std::atoi(str);
 }
 
@@ -609,15 +669,30 @@ static void regulate_dma_run_param(Param& param, bool force = false)
 }
 
 static int
-run_multiple_process(char **argv, char *envp[], const Param& param)
+run_multiple_process(std::vector<char*>& argv, char *envp[], const Param& param)
 {
     pid_t pids[param.processes];
     int c, status;
+    std::string kname = param.kname;
 
     for (c = 0; c < param.processes; c++) {
-        status = posix_spawn(&pids[c], argv[0], NULL, NULL, argv, envp);
-        if (status)
+        argv.push_back((char *)"-N");
+        kname = param.kname;
+        if (param.cu_type == MULTI_CU_PER_KERNEL) {
+            kname = kname.substr(0, kname.find(":"));
+            kname = kname + ":{" + kname + "_" + std::to_string(c+1) + "}";
+        } else if (param.cu_type == MULTI_KERNEL_WITH_ONE_CU_EACH) {
+            kname = kname.substr(0, kname.find("_"));
+            kname = kname + "_" +std::to_string(c+1) + ":{" + kname + "_" + std::to_string(c+1) + "_1}";
+        }
+        argv.push_back(&kname[0]);
+        status = posix_spawn(&pids[c], argv.data()[0], NULL, NULL, argv.data(), envp);
+        argv.pop_back();
+        argv.pop_back();
+        if (status) {
+            std::cerr << "status: " << status << std::endl;
             throw std::runtime_error("posix_spawn failed");
+        }
         //std::cout << "process: " << pids[c] << " spawned..." << std::endl;
     }
 
@@ -682,7 +757,7 @@ static int run(const Param& param, MaxT& maxT)
     Timer timer_ld;
     auto uuid = device.load_xclbin(param.xclbin_file);
     timer_ld.stop();
-    auto hello = xrt::kernel(device, uuid.get(), "hello:hello_1");
+    auto krnl = xrt::kernel(device, uuid.get(), param.kname);
     int c; 
     int bulk = std::min(param.bulk, param.loop);
     std::cout << "Test running...(pid: " << getpid() <<", xclbin loaded in " << timer_ld.elapsed() << " ms)\n";
@@ -694,8 +769,23 @@ static int run(const Param& param, MaxT& maxT)
     std::vector<std::vector<Cmd>> cmds;
     for (c = 0; c < param.threads; c++) {
     	std::vector<Cmd> cmdlist;
+        if (!param.quiet) { // a ugly way to tell the run is not from multiple process case
+            std::string kname = param.kname;
+            if (param.cu_type == MULTI_CU_PER_KERNEL) {
+                kname = kname.substr(0, kname.find(":"));
+                kname = kname + ":{" + kname + "_" + std::to_string(c+1) + "}";
+                krnl = xrt::kernel(device, uuid.get(), kname);
+            } else if (param.cu_type == MULTI_KERNEL_WITH_ONE_CU_EACH) {
+                kname = kname.substr(0, kname.find("_"));
+                kname = kname + "_" +std::to_string(c+1) + ":{" + kname + "_" + std::to_string(c+1) + "_1}";
+                krnl = xrt::kernel(device, uuid.get(), kname);
+            }
+            std::cout << "thread " << c <<" running kernel name: " << kname << std::endl; 
+        } else {
+            std::cout << "thread " << c <<" running kernel name: " << param.kname << std::endl; 
+        }
     	for (int i = 0; i < bulk; i++) {
-        	auto cmd = Cmd(device, hello, param.bo_sz, param.latency, param.dir);
+        	auto cmd = Cmd(device, krnl, param.bo_sz, param.latency, param.dir);
         	cmdlist.push_back(std::move(cmd));
     	}
        	cmds.push_back(std::move(cmdlist));
@@ -726,31 +816,36 @@ static void
 check_param(const Param& param)
 {
     if (param.xclbin_file.empty())
-        throw std::runtime_error("\nNo -k specified");    
+        throw std::runtime_error("\nNo -k specified");
                                                                          
     if (param.device_index >= xclProbe())                                      
         throw std::runtime_error("\n-d specified error");
 
-    if (param.mode < 1 || param.mode > 4)
-        throw std::runtime_error("\n-m specified error");    
+    if (param.mode < MODE_TPUT || param.mode > MODE_SINGLE_RUN)
+        throw std::runtime_error("\n-m specified error");
 
-    if (param.run_type < 1 || param.run_type > 2)
-        throw std::runtime_error("\n-K specified error");    
+    if (param.run_type < RUN_TYPE_DMA || param.run_type > RUN_TYPE_KERNEL)
+        throw std::runtime_error("\n-K specified error");
 
     if (param.dir < 0 || (param.dir > 1 && param.dir != INT_MAX))
-        throw std::runtime_error("\n-D specified error");    
+        throw std::runtime_error("\n-D specified error");
 
     if (param.processes == 0)
-        throw std::runtime_error("\n-p specified error");    
+        throw std::runtime_error("\n-p specified error");
 
     if (param.threads == 0)
-        throw std::runtime_error("\n-t specified error");    
+        throw std::runtime_error("\n-t specified error");
 
     if (param.bulk == 0)
-        throw std::runtime_error("\n-b specified error");    
+        throw std::runtime_error("\n-b specified error");
 
     if (param.loop == 0)
-        throw std::runtime_error("\n-n specified error");    
+        throw std::runtime_error("\n-n specified error");
+
+    if (param.cu_type == KERNEL_CU_ILLEGAL)
+        throw std::runtime_error("\n-c specified error");
+    else if (param.cu_type == MULTI_KERNEL_WITH_ONE_CU_EACH)
+        param.kname = DEF_KNAME + "_1:{" + DEF_KNAME + "_1_1}";
 }
 
 int run(int argc, char** argv, char *envp[])
@@ -764,15 +859,18 @@ int run(int argc, char** argv, char *envp[])
     int bulk = DEFAULT_BULK;
     int processes = 1;
     int c;
-    int mode = 4;
-    int run_type = 2;
+    int mode = MODE_SINGLE_RUN;
+    int run_type = RUN_TYPE_KERNEL;
+    int cu_type = ONE_KERNEL_ONE_CU;
     double time = 0;
     int dir = INT_MAX;
     std::string boStr = "4k";
+    std::string kname = DEF_KNAME + ":{" + DEF_KNAME + "_1}";
     std::vector<char *> nargv;
+    nargv.reserve(30);
     nargv.push_back(argv[0]);
     
-    while ((c = getopt(argc, argv, "b:d:hk:m:n:p:qs:t:D:LK:T:")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:d:hk:m:n:p:qs:t:D:LK:T:N:")) != -1) {
         switch (c)
         {
         case 'b':
@@ -780,6 +878,9 @@ int run(int argc, char** argv, char *envp[])
             nargv.push_back((char *)"-b");
             nargv.push_back(optarg);
             break;    
+        case 'c':
+            cu_type = get_cu_type(optarg);
+            break;
         case 'd':
             device_index = std::atoi(optarg);
             nargv.push_back((char *)"-d");
@@ -795,6 +896,9 @@ int run(int argc, char** argv, char *envp[])
             nargv.push_back((char *)"-n");
             nargv.push_back(optarg);
             break;    
+        case 'N':
+            kname = optarg;
+            break;
         case 's':
             boStr = optarg;
             nargv.push_back((char *)"-s");
@@ -843,17 +947,18 @@ int run(int argc, char** argv, char *envp[])
         }                               
     }                                   
   
-    Param param = {device_index, processes, threads, bulk, loop, time, lat, quiet, xclbin_fnm, dir, boStr, mode, run_type};
+    Param param = {device_index, processes, threads, bulk, loop, time, lat,
+        quiet, xclbin_fnm, dir, boStr, mode, run_type, kname, cu_type};
     check_param(param);                     
     MaxT maxT = {0};
 
-    if (mode == 1) { /*throughput test. one 1 process is being used.*/
+    if (mode == MODE_TPUT) { /*throughput test. one 1 process is being used.*/
         std::cout << "\nThroughput test...\n";
         param.processes = 1;
         auto t = make_p2(param.threads);
         for (int i = 1; i <= t; i *= 2) {
             param.threads = i;
-            if (run_type == 2) {
+            if (run_type == RUN_TYPE_KERNEL) {
                 for (int j = 1; j <= 256; j *= 2) {
                     param.bulk = j;
                     run(param, maxT);
@@ -870,9 +975,9 @@ int run(int argc, char** argv, char *envp[])
                 }
             }
         }
-        if (run_type == 2)
+        if (run_type == RUN_TYPE_KERNEL)
             showTputResult(param, maxT);
-    } else if (mode == 2) { /*multiple process test*/
+    } else if (mode == MODE_MP) { /*multiple process test*/
         std::cout << "\nMultiple process test...\n";
         if (param.processes == 1) {
             std::cout << "Warning: -p to specify maximum processes!!!\n\n";
@@ -885,23 +990,23 @@ int run(int argc, char** argv, char *envp[])
         nargv.push_back((char *)"-q");
         for (int i = 1; i <= p; i *= 2) {
             param.processes = i;
-            if (param.dir == INT_MAX && param.run_type == 1) {
+            if (param.dir == INT_MAX && param.run_type == RUN_TYPE_DMA) {
                 param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
                 nargv.push_back((char *)"-D");
                 nargv.push_back((char *)"0");
-                run_multiple_process(nargv.data(), envp, param);
+                run_multiple_process(nargv, envp, param);
                 nargv.pop_back();
                 nargv.push_back((char *)"1");
                 param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
-                run_multiple_process(nargv.data(), envp, param);
+                run_multiple_process(nargv, envp, param);
                 nargv.pop_back();
                 nargv.pop_back();
                 param.dir = INT_MAX;
             } else {
-                run_multiple_process(nargv.data(), envp, param);
+                run_multiple_process(nargv, envp, param);
             }
         }
-    } else if (mode == 3) { /*multiple thread test*/
+    } else if (mode == MODE_MT) { /*multiple thread test*/
         std::cout << "\nMultiple thread test...\n";
         if (param.threads == 1) {
             std::cout << "Warning: -t to specify maximum threads!!!\n\n";
@@ -913,7 +1018,7 @@ int run(int argc, char** argv, char *envp[])
         }
         for (int i = 1; i <= t; i *= 2) {
             param.threads = i;
-            if (run_type == 2) {
+            if (run_type == RUN_TYPE_KERNEL) {
                 run(param, maxT);
             } else {
                 regulate_dma_run_param(param);
@@ -934,22 +1039,22 @@ int run(int argc, char** argv, char *envp[])
              * just print the whole instead.
              */  
             nargv.push_back((char *)"-q");
-            if (param.dir == INT_MAX && param.run_type == 1) {
+            if (param.dir == INT_MAX && param.run_type == RUN_TYPE_DMA) {
                 param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
                 nargv.push_back((char *)"-D");
                 nargv.push_back((char *)"0");
-                run_multiple_process(nargv.data(), envp, param);
+                run_multiple_process(nargv, envp, param);
                 nargv.pop_back();
                 nargv.push_back((char *)"1");
                 param.dir = XCL_BO_SYNC_BO_FROM_DEVICE;
-                run_multiple_process(nargv.data(), envp, param);
+                run_multiple_process(nargv, envp, param);
             } else {
-                run_multiple_process(nargv.data(), envp, param);
+                run_multiple_process(nargv, envp, param);
             }
             return 0;
         }
 
-        if (run_type == 2) {
+        if (run_type == RUN_TYPE_KERNEL) {
             run(param, maxT);
         } else {
             regulate_dma_run_param(param);
