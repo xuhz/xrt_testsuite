@@ -99,6 +99,7 @@ struct Param {
     int run_type;
     std::string& kname;
     int cu_type;
+    int interval;
 };
 
 struct Count {
@@ -133,6 +134,10 @@ public:
     bool expire() const {
         auto e = std::chrono::high_resolution_clock::now();
         return period && std::chrono::duration<double, std::milli>(e - start).count() > period;
+    }
+    bool expire(double target) const {
+        auto e = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double, std::milli>(e - start).count() > target * 1000;
     }
 };
 
@@ -280,7 +285,9 @@ static size_t get_value(std::string& szStr)
 void usage(char* exename)
 {
     std::cout << "usage:\n";
-    std::cout << "  " << exename << " [options] -k <bitstream>\n\n";
+    std::cout << "  " << exename << " [options] -k <bitstream> [interval]\n\n";
+    std::cout << "  interval, used only when doing throughput single run, and -T is specified,\n";
+    std::cout << "            in this case, throughput will be printed every 'interval' seconds\n";
     std::cout << "  options:\n";
     std::cout << "\t-k <bitstream>, specifying path to xclbin file, mandatory \n";
     std::cout << "\t-b <bulk>, specifying cmd queue length per thread, optional,\n";
@@ -715,10 +722,12 @@ run_multiple_process(std::vector<char*>& argv, char *envp[], const Param& param)
  * a loop is used to check all the cmds one by one -- this is not an efficient way though
  */ 
 static void
-thr0(std::vector<Cmd>& cmds, int loop, const Timer& timer)
+thr0(std::vector<Cmd>& cmds, int loop, const Timer& timer, int interval)
 {
     int issued = 0, completed = 0;
     uint32_t c = 0;
+    int target = interval;
+    int last = 0;
     for (auto& cmd : cmds) {
         cmd.run();
         issued++;
@@ -736,6 +745,11 @@ thr0(std::vector<Cmd>& cmds, int loop, const Timer& timer)
 
         if (++c == cmds.size())
             c = 0;
+        if (target && timer.expire(target)) {
+            target += interval;
+            std::cout << "\t ... " << (completed - last) / interval << " ops/s\n";
+            last = completed;
+        }
         if (!loop && timer.expire()) {
             break;
         }
@@ -797,11 +811,15 @@ static int run(const Param& param, MaxT& maxT)
      * Better way is, driver has statistics and can be reported by a tool like, custat
      */  
     Timer timer(param.time);
+    int interval = 0;
     if (param.threads == 1) {
-        thr0(cmds[0], param.time ? 0 : param.loop, timer);
+        if (param.time > param.interval && param.run_type == RUN_TYPE_KERNEL &&
+            !param.latency) //implicit feature for throughput run
+            interval = param.interval;
+        thr0(cmds[0], param.time ? 0 : param.loop, timer, interval);
     } else {
         for (c = 0; c < param.threads; c++)
-            thrs.emplace_back(&thr0, std::ref(cmds[c]), param.time ? 0 : param.loop, std::ref(timer));
+            thrs.emplace_back(&thr0, std::ref(cmds[c]), param.time ? 0 : param.loop, std::ref(timer), interval);
         for (auto& t : thrs)
             t.join();
     }
@@ -862,6 +880,7 @@ int run(int argc, char** argv, char *envp[])
     int mode = MODE_SINGLE_RUN;
     int run_type = RUN_TYPE_KERNEL;
     int cu_type = ONE_KERNEL_ONE_CU;
+    int interval = 0;
     double time = 0;
     int dir = INT_MAX;
     std::string boStr = "4k";
@@ -945,10 +964,14 @@ int run(int argc, char** argv, char *envp[])
             usage(argv[0]);             
             throw std::runtime_error("Unknown option value");
         }                               
-    }                                   
+    }
+	    
+    if (argc != optind) {
+        interval = std::atoi(argv[optind]);
+    }
   
     Param param = {device_index, processes, threads, bulk, loop, time, lat,
-        quiet, xclbin_fnm, dir, boStr, mode, run_type, kname, cu_type};
+        quiet, xclbin_fnm, dir, boStr, mode, run_type, kname, cu_type, interval};
     check_param(param);                     
     MaxT maxT = {0};
 

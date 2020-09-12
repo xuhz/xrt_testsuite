@@ -74,6 +74,23 @@ kernel execution throughput:
 	queue length: 1
 	throughput: 16160.4 ops/s (30000 executions in 1856.39 ms)
 ```
+### kernel execution throughput test -- throughput will be printed every second
+```
+./host.exe -k /opt/xilinx/dsa/xilinx_u200_xdma_201830_2/test/verify.xclbin -T 5 1
+Test running...(pid: 46291, xclbin loaded in 36.2746 ms)
+thread 0 running kernel name: hello:{hello_1}
+	 ... 98270 ops/s
+	 ... 98706 ops/s
+	 ... 98645 ops/s
+	 ... 98564 ops/s
+	 ... 98811 ops/s
+
+kernel execution throughput:
+	process(es): 1
+	thread(s) per process: 1
+	queue length: 32
+	throughput: 98594.5 ops/s (492996 executions in 5000.24 ms)
+```
 ### run test on device 1, with 2 threads, for 5.1s
 ```
 ./host.exe -k /opt/xilinx/firmware/u25/gen3x8-xdma/base/test/verify.xclbin -d 1 -t 2 -T 5.1
