@@ -10,6 +10,21 @@ This test program can be used to run
 * length for kernel execution or bo size for DMA, throughput or latency 
 
 The test is xrt native API based, having similar overhead to the opencl API based
+
+## Known issues
+* xrt native APIs not stable yet, so sometimes a xrt build change makes the compilation fail.
+  eg. https://github.com/Xilinx/XRT/commit/5bb8fdf3ab97a168f5ca5b990f800ecceeda2f21
+
+  The above PR makes the API change 
+  from "wait(unsigned int timeout_ms) const"
+  to "wait(const std::chrono::milliseconds& timeout_ms) const"
+
+  If you see runtime error, like "./host.exe: undefined symbol: _ZNK3xrt3run4waitEj ",
+  that probobally means the xrt version and the binary built don't match.
+  
+  This commit, '19afcc829f79efc1424b4a4f422160ed93a421f5' is the devide line. Before(inclusive) of
+  which old API is used, after new API is used. 
+   
  
 ## cmdline: 
 ```
