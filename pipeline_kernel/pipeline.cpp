@@ -217,7 +217,8 @@ private:
 
     bool kernel_done()
     {
-        auto state = cmd_out.wait(1000);
+        std::chrono::milliseconds ts(1000);
+        auto state = cmd_out.wait(ts);
         switch (state) {
             case ERT_CMD_STATE_COMPLETED:
             case ERT_CMD_STATE_ERROR:
@@ -752,8 +753,8 @@ static int run(const Param& param, MaxT& maxT)
     Timer timer_ld;
     auto uuid = device.load_xclbin(param.xclbin_file);
     timer_ld.stop();
-    auto krnl_first = xrt::kernel(device, uuid.get(), KNAME_FIRST);
-    auto krnl_last = xrt::kernel(device, uuid.get(), KNAME_LAST);
+    auto krnl_first = xrt::kernel(device, uuid.get(), KNAME_FIRST, false);
+    auto krnl_last = xrt::kernel(device, uuid.get(), KNAME_LAST, false);
     int c; 
     int bulk = std::min(param.bulk, param.loop);
     std::cout << "Test running...(pid: " << getpid() <<", xclbin loaded in " << timer_ld.elapsed() << " ms)\n";

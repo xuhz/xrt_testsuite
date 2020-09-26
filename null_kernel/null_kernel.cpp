@@ -241,7 +241,8 @@ private:
 
     bool kernel_done()
     {
-        auto state = cmd.wait(1000);
+        std::chrono::milliseconds ts(1000);
+        auto state = cmd.wait(ts);
         switch (state) {
             case ERT_CMD_STATE_COMPLETED:
             case ERT_CMD_STATE_ERROR:
@@ -789,7 +790,7 @@ static int run(const Param& param, MaxT& maxT)
     Timer timer_ld;
     auto uuid = device.load_xclbin(param.xclbin_file);
     timer_ld.stop();
-    auto krnl = xrt::kernel(device, uuid.get(), param.kname);
+    auto krnl = xrt::kernel(device, uuid.get(), param.kname, false);
     int num_args = param.kname[param.kname.find("_")+1] - 'a' + 1;
     int c; 
     int bulk = std::min(param.bulk, param.loop);
@@ -807,11 +808,11 @@ static int run(const Param& param, MaxT& maxT)
             if (param.cu_type == MULTI_CU_PER_KERNEL) {
                 kname = kname.substr(0, kname.find(":"));
                 kname = kname + ":{" + kname + "_" + std::to_string(c+1) + "}";
-                krnl = xrt::kernel(device, uuid.get(), kname);
+                krnl = xrt::kernel(device, uuid.get(), kname, false);
             } else if (param.cu_type == MULTI_KERNEL_WITH_ONE_CU_EACH) {
                 kname = kname.substr(0, kname.find("_"));
                 kname = kname + "_" +std::to_string(c+1) + ":{" + kname + "_" + std::to_string(c+1) + "_1}";
-                krnl = xrt::kernel(device, uuid.get(), kname);
+                krnl = xrt::kernel(device, uuid.get(), kname, false);
             }
             std::cout << "thread " << c <<" running kernel name: " << kname << std::endl; 
         } else {

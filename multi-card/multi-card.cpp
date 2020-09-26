@@ -200,7 +200,8 @@ private:
 
     bool kernel_done()
     {
-        auto state = cmd.wait(1000);
+        std::chrono::milliseconds ts(1000);
+        auto state = cmd.wait(ts);
         switch (state) {
             case ERT_CMD_STATE_COMPLETED:
             case ERT_CMD_STATE_ERROR:
@@ -270,14 +271,14 @@ void usage(char* exename)
     std::cout << "  " << exename << " [options] -k <bitstream>\n\n";
     std::cout << "  options:\n";
     std::cout << "\t-k <bitstream>, specifying list of path to xclbin file, mandatory \n";
-    std::cout << "\t           names of the files are separated by ","\n";
+    std::cout << "\t           names of the files are separated by \",\"\n";
     std::cout << "\t-b <bulk>, specifying cmd queue length per thread, optional,\n";
     std::cout << "\t           default is minimum of 32 and number of executions (see -n)\n";
     std::cout << "\t           cmd queue length number of cmds will be issued before polling cmd status,\n";
     std::cout << "\t           this is the aka bulk submit, then afterwards, a new cmd will be issued only after one cmd is complete\n";
     std::cout << "\t           when bulk size is 1, it is ping-pong test\n"; 
     std::cout << "\t-d <index>, specifying list of index to FPGA device, mandatory\n";
-    std::cout << "\t           names of the index are separated by ",", order should match xclbin file order specified by -k\n";
+    std::cout << "\t           names of the index are separated by \",\", order should match xclbin file order specified by -k\n";
     std::cout << "\t-n <count>, specifying number of kernel executions per thread, optional, defualt is 30000\n";
     std::cout << "\t-s <bo size>, specifying size of BO, optional, default is 4k\n";
     std::cout << "\t-t <threads>, specifying number of threads per process, optional, default is 1\n";
@@ -725,7 +726,7 @@ static int run(const Param& param, MaxT& maxT)
     Timer timer_ld;
     auto uuid = device.load_xclbin(param.xclbin_file);
     timer_ld.stop();
-    auto krnl = xrt::kernel(device, uuid.get(), param.kname);
+    auto krnl = xrt::kernel(device, uuid.get(), param.kname, false);
     int c; 
     int bulk = std::min(param.bulk, param.loop);
     std::cout << "Test running...(pid: " << getpid() <<", xclbin loaded in " << timer_ld.elapsed() << " ms)\n";
