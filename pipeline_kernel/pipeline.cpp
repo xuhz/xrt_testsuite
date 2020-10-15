@@ -378,28 +378,29 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
     }
     if (!param.quiet) {
         std::ofstream handle(qor_csv_file, std::ofstream::app);
-        std::string line = "{";
-        line += "\"metric\": pipeline kernel ";
+        std::string line;
+        line += "pipeline kernel ";
         if (param.mode == MODE_MT) {
-            line += "\"multi thread ";
+            line += "multi thread ";
         }
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
             std::cout << "\nDMA FPGA read ";
-            line += "DMA FPGA read ";
+            line += "DMA FPGA read\n";
         } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
             std::cout << "\nDMA FPGA write ";
-            line += "DMA FPGA write ";
+            line += "DMA FPGA write\n";
         } else {
             std::cout << "\nkernel execution ";
-            line += "kernel execution ";
+            line += "kernel execution\n";
         }
         if (!param.latency) {
             std::cout << "throughput:\n";
-            line += "throughput\",";
+            line += "throughput\n";
         } else {
             std::cout << "latency:\n";
-            line += "latency\",";
+            line += "latency\n";
         }
+	line += "{";
         std::cout <<  "\tprocess(es): " << param.processes << std::endl;
         line += "\"process\":" + std::to_string(param.processes) + ",";
         std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
@@ -555,25 +556,26 @@ static void handleProcessResult(const Param& param)
         boost::filesystem::remove_all(TMP);
 
     std::ofstream handle(qor_csv_file, std::ofstream::app);
-    std::string line = "{";
-    line += "\"metric\":multiple process pipeline kernel ";
+    std::string line;
+    line += "multiple process pipeline kernel ";
     if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
         std::cout << "\nDMA FPGA read ";
-        line += "DMA FPGA read ";
+        line += "DMA FPGA read\n";
     } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
         std::cout << "\nDMA FPGA write ";
-        line += "DMA FPGA write ";
+        line += "DMA FPGA write\n";
     } else {
         std::cout << "\nkernel execution ";
-        line += "kernel execution ";
+        line += "kernel execution\n";
     }
     if (!param.latency) {
         std::cout << "throughput:\n";
-        line += "throughput\",";
+        line += "throughput\n";
     } else {
         std::cout << "latency:\n";
-        line += "latency\",";
+        line += "latency\n";
     }
+    line += "{";
     std::cout <<  "\tprocess(es): " << param.processes << std::endl;
     line += "\"process\":" + std::to_string(param.processes) + ",";
     std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;

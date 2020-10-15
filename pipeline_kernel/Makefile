@@ -1,7 +1,7 @@
 CC     = g++
 XILINX_XRT = /opt/xilinx/xrt
 CFLAGS = -g -std=c++14 -Wall -I ${XILINX_XRT}/include 
-LFLAGS = -lstdc++ -lxrt_coreutil -lxrt_core -lrt -luuid -lboost_system -lboost_filesystem -pthread -L ${XILINX_XRT}/lib
+LFLAGS = -lxrt_coreutil -lxrt_core -lrt -luuid -lboost_system -lboost_filesystem -pthread -L ${XILINX_XRT}/lib
 
 OBJ = pipeline.o
 
