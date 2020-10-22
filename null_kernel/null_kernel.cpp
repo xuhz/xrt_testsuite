@@ -332,9 +332,6 @@ void usage(char* exename)
     std::cout << "\t-p <processes>, specifying number of processes spawned, optional, default is 1\n";
     std::cout << "\t-T <second>, specifying number of second the test will run, exclusive to -n, optional\n";
     std::cout << "\t-L if specified, will test latency\n";
-    std::cout << "\t-K <run type> optional, default is 2\n";
-    std::cout << "\t           1|dma: dma test\n";
-    std::cout << "\t           2|kernel: kernel execution test\n";
     std::cout << "\t-N <kernel/cu name> optional,\n";
     std::cout << "\t            default for one cu per kernel is \"hello:{hello_1}\"\n";
     std::cout << "\t            default for multiple cu per kernel is \"hello_1:{hello_1_1}\"\n";
@@ -374,6 +371,36 @@ static void saveProcessResult(const Timer& timer, const Count& res)
     handle.close();
 }
 
+static void printCsvTitle(const Param& param)
+{   
+    if (param.quiet)
+        return;
+    
+    std::ofstream handle(qor_csv_file, std::ofstream::app);
+    std::string line; 
+    line += "null_kernel_";
+    int num_args = param.kname[param.kname.find("_")+1] - 'a' + 1;
+    line += std::to_string(num_args) + "_arg_";
+    if (param.mode == MODE_MT) {
+        line += "multi_thread_";
+    } else if (param.mode == MODE_MP) {
+        line += "multi_process_";
+    }
+    if (param.run_type == RUN_TYPE_DMA) {
+        line += "DMA\n";
+    } else { 
+        line += "kernel_execution\n";
+    }
+    if (!param.latency) {
+        line += "throughput\n";
+    } else { 
+        line += "latency\n";
+    }
+    handle << line;
+    handle.close();
+}
+
+
 static void printResult(const Param& param, const Timer& timer, const std::vector<std::vector<Cmd>>& cmds, MaxT& maxT)
 {
     Count res = {LLONG_MAX, LLONG_MIN, 0, 0};
@@ -400,31 +427,21 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
     }
     if (!param.quiet) {
         std::ofstream handle(qor_csv_file, std::ofstream::app);
-        std::string line;
-        line += "null kernel ";
-        int num_args = param.kname[param.kname.find("_")+1] - 'a' + 1;
-        line += std::to_string(num_args) + " arg ";
-        if (param.mode == MODE_MT) {
-            line += "multi thread ";
-        }
+        std::string line = "{";
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
             std::cout << "\nDMA FPGA read ";
-            line += "DMA FPGA read\n";
+            line += "\"direction\":\"h2c\",";
         } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
             std::cout << "\nDMA FPGA write ";
-            line += "DMA FPGA write\n";
+            line += "\"direction\":\"c2h\",";
         } else {
             std::cout << "\nkernel execution ";
-            line += "kernel execution\n";
         }
         if (!param.latency) {
             std::cout << "throughput:\n";
-            line += "throughput\n";
         } else {
             std::cout << "latency:\n";
-            line += "latency\n";
         }
-	line += "{";
         std::cout <<  "\tprocess(es): " << param.processes << std::endl;
         line += "\"process\":" + std::to_string(param.processes) + ",";
         std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
@@ -580,28 +597,21 @@ static void handleProcessResult(const Param& param)
         boost::filesystem::remove_all(TMP);
 
     std::ofstream handle(qor_csv_file, std::ofstream::app);
-    std::string line;
-    line += "multiple process null kernel ";
-	int num_args = param.kname[param.kname.find("_")+1] - 'a' + 1;
-    line += std::to_string(num_args) + " arg ";
+    std::string line = "{";
     if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
         std::cout << "\nDMA FPGA read ";
-        line += "DMA FPGA read\n";
+        line += "\"direction\":\"h2c\",";
     } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
         std::cout << "\nDMA FPGA write ";
-        line += "DMA FPGA write\n";
+        line += "\"direction\":\"c2h\",";
     } else {
         std::cout << "\nkernel execution ";
-        line += "kernel execution\n";
     }
     if (!param.latency) {
         std::cout << "throughput:\n";
-        line += "throughput\n";
     } else {
         std::cout << "latency:\n";
-        line += "latency\n";
     }
-    line += "{";
     std::cout <<  "\tprocess(es): " << param.processes << std::endl;
     line += "\"process\":" + std::to_string(param.processes) + ",";
     std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
@@ -905,7 +915,7 @@ int run(int argc, char** argv, char *envp[])
     nargv.reserve(30);
     nargv.push_back(argv[0]);
     
-    while ((c = getopt(argc, argv, "b:c:d:hk:m:n:p:qs:t:D:LK:T:N:")) != -1) {
+    while ((c = getopt(argc, argv, "b:c:d:hk:m:n:p:qs:t:D:LT:N:")) != -1) {
         switch (c)
         {
         case 'b':
@@ -943,11 +953,6 @@ int run(int argc, char** argv, char *envp[])
             threads = std::atoi(optarg);
             nargv.push_back((char *)"-t");
             nargv.push_back(optarg);
-            break;
-        case 'K':
-            run_type = get_run_type(optarg);
-            nargv.push_back((char *)"-K");
-            nargv.push_back(optarg);    
             break;                      
         case 'T':
             time = std::atof(optarg);
@@ -986,6 +991,7 @@ int run(int argc, char** argv, char *envp[])
         quiet, xclbin_fnm, dir, boStr, mode, run_type, kname, cu_type};
     check_param(param);                     
     MaxT maxT = {0};
+    printCsvTitle(param);
 
     if (mode == MODE_TPUT) { /*throughput test. one 1 process is being used.*/
         std::cout << "\nThroughput test...\n";
@@ -1072,7 +1078,8 @@ int run(int argc, char** argv, char *envp[])
             /*
              * when running multiple process test, we don't print number for each process/thread,
              * just print the whole instead.
-             */  
+             */ 
+            printCsvTitle(param);
             nargv.push_back((char *)"-q");
             if (param.dir == INT_MAX && param.run_type == RUN_TYPE_DMA) {
                 param.dir = XCL_BO_SYNC_BO_TO_DEVICE;

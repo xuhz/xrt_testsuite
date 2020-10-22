@@ -352,6 +352,34 @@ static void saveProcessResult(const Timer& timer, const Count& res)
     handle.close();
 }
 
+static void printCsvTitle(const Param& param)
+{   
+    if (param.quiet)
+        return;
+    
+    std::ofstream handle(qor_csv_file, std::ofstream::app);
+    std::string line; 
+    line += "pipeline_kernel_";
+    if (param.mode == MODE_MT) {
+        line += "multi_thread_";
+    } else if (param.mode == MODE_MP) {
+        line += "multi_process_";
+    }
+    if (param.run_type == RUN_TYPE_DMA) {
+        line += "DMA\n";
+    } else { 
+        line += "kernel_execution\n";
+    }
+    if (!param.latency) {
+        line += "throughput\n";
+    } else { 
+        line += "latency\n";
+    }
+    handle << line;
+    handle.close();
+}
+
+
 static void printResult(const Param& param, const Timer& timer, const std::vector<std::vector<Cmd>>& cmds, MaxT& maxT)
 {
     Count res = {LLONG_MAX, LLONG_MIN, 0, 0};
@@ -378,29 +406,21 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
     }
     if (!param.quiet) {
         std::ofstream handle(qor_csv_file, std::ofstream::app);
-        std::string line;
-        line += "pipeline kernel ";
-        if (param.mode == MODE_MT) {
-            line += "multi thread ";
-        }
+        std::string line = "{";
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
             std::cout << "\nDMA FPGA read ";
-            line += "DMA FPGA read\n";
+            line += "\"direction\":\"h2c\",";
         } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
             std::cout << "\nDMA FPGA write ";
-            line += "DMA FPGA write\n";
+            line += "\"direction\":\"c2h\",";
         } else {
             std::cout << "\nkernel execution ";
-            line += "kernel execution\n";
         }
         if (!param.latency) {
             std::cout << "throughput:\n";
-            line += "throughput\n";
         } else {
             std::cout << "latency:\n";
-            line += "latency\n";
         }
-	line += "{";
         std::cout <<  "\tprocess(es): " << param.processes << std::endl;
         line += "\"process\":" + std::to_string(param.processes) + ",";
         std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
@@ -556,26 +576,21 @@ static void handleProcessResult(const Param& param)
         boost::filesystem::remove_all(TMP);
 
     std::ofstream handle(qor_csv_file, std::ofstream::app);
-    std::string line;
-    line += "multiple process pipeline kernel ";
+    std::string line = "{";
     if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
         std::cout << "\nDMA FPGA read ";
-        line += "DMA FPGA read\n";
+        line += "\"direction\":\"h2c\",";
     } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
         std::cout << "\nDMA FPGA write ";
-        line += "DMA FPGA write\n";
+        line += "\"direction\":\"c2h\",";
     } else {
         std::cout << "\nkernel execution ";
-        line += "kernel execution\n";
     }
     if (!param.latency) {
         std::cout << "throughput:\n";
-        line += "throughput\n";
     } else {
         std::cout << "latency:\n";
-        line += "latency\n";
     }
-    line += "{";
     std::cout <<  "\tprocess(es): " << param.processes << std::endl;
     line += "\"process\":" + std::to_string(param.processes) + ",";
     std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
@@ -933,6 +948,7 @@ int run(int argc, char** argv, char *envp[])
         quiet, xclbin_fnm, dir, boStr, mode, run_type, kname, cu_type};
     check_param(param);                     
     MaxT maxT = {0};
+    printCsvTitle(param);
 
     if (mode == MODE_TPUT) { /*throughput test. one 1 process is being used.*/
         std::cout << "\nThroughput test...\n";
@@ -1020,6 +1036,7 @@ int run(int argc, char** argv, char *envp[])
              * when running multiple process test, we don't print number for each process/thread,
              * just print the whole instead.
              */  
+            printCsvTitle(param);
             nargv.push_back((char *)"-q");
             if (param.dir == INT_MAX && param.run_type == RUN_TYPE_DMA) {
                 param.dir = XCL_BO_SYNC_BO_TO_DEVICE;
