@@ -824,7 +824,7 @@ split(const std::string& input, std::vector<std::string>& output)
 {
     size_t start = 0, last = 0;
     while ((start = input.find(",", last)) != std::string::npos) {
-        output.push_back(input.substr(last, start));
+        output.push_back(input.substr(last, start-last));
         last = start+1;
     }
     output.push_back(input.substr(last));
@@ -873,6 +873,8 @@ int run(int argc, char** argv, char *envp[])
             break;    
         case 'N':
             kname = optarg;
+            nargv.push_back((char *)"-N");
+            nargv.push_back(optarg);
             break;
         case 's':
             boStr = optarg;
