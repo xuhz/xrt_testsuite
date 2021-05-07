@@ -408,10 +408,10 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
         std::string line = "{";
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
             std::cout << "\nDMA FPGA read ";
-            line += "\"direction\":\"h2c\",";
+            line += "\"direction\": \"h2c\", ";
         } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
             std::cout << "\nDMA FPGA write ";
-            line += "\"direction\":\"c2h\",";
+            line += "\"direction\": \"c2h\", ";
         } else {
             std::cout << "\nkernel execution ";
         }
@@ -421,24 +421,24 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
             std::cout << "latency:\n";
         }
         std::cout <<  "\tprocess(es): " << param.processes << std::endl;
-        line += "\"process\":" + std::to_string(param.processes) + ",";
+        line += "\"process\": " + std::to_string(param.processes) + ", ";
         std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
-        line += "\"thread\":" + std::to_string(param.threads) + ",";
+        line += "\"thread\": " + std::to_string(param.threads) + ", ";
         if (!param.latency) {
             if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
                 param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
                 std::cout << "\tbo size: " << param.bo_sz << std::endl;
-                line += "\"bo size\":" + param.bo_sz + ",";
+                line += "\"bo_size\": \"" + param.bo_sz + "\", ";
                 std::cout << "\tbandwidth: ";
-                line += "\"bandwidth MB/s\":";
+                line += "\"bandwidth_MB_per_sec\": ";
                 std::cout << res.count * get_value(param.bo_sz) / timer.elapsed() / 1000 << " MB/s (";
                 std::cout << res.count << " transfers in " << timer.elapsed() << " ms)\n";
-                line +=  std::to_string(res.count * get_value(param.bo_sz) / timer.elapsed() / 1000); 
+                line +=  std::to_string(res.count * get_value(param.bo_sz) / timer.elapsed() / 1000);
             } else {
                 std::cout << "\tqueue length: " << param.bulk << std::endl;
-                line += "\"queue length\":" + std::to_string(param.bulk) + ",";
+                line += "\"queue_length\": " + std::to_string(param.bulk) + ", ";
                 std::cout << "\tthroughput: ";
-                line += "\"throughput ops/s\":";
+                line += "\"throughput_op_per_sec\": ";
                 std::cout << res.count / timer.elapsed() * 1000 << " ops/s (";
                 std::cout << res.count << " executions in " << timer.elapsed() << " ms)\n";
                 line += std::to_string(res.count / timer.elapsed() * 1000);
@@ -447,19 +447,19 @@ static void printResult(const Param& param, const Timer& timer, const std::vecto
             if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
                 param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
                 std::cout << "\tbo size: " << param.bo_sz << std::endl;
-                line += "\"bo size\":" + param.bo_sz + ",";
+                line += "\"bo_size\": \"" + param.bo_sz + "\", ";
             } else {
                 std::cout << "\tqueue length: " << param.bulk << std::endl;
-                line += "\"queue length\":" + std::to_string(param.bulk) + ",";
+                line += "\"queue_length\": " + std::to_string(param.bulk) + ", ";
             }
             std::cout << "\tcount: " << res.count << std::endl;
-            line += "\"count\":" + std::to_string(res.count) + ",";
+            line += "\"count\": " + std::to_string(res.count) + ", ";
             std::cout << "\tmin: " << (double)res.min / 1000000 << " ms\n";
-            handle << line + "\"min ms\":" + std::to_string((double)res.min / 1000000) + "}\n";
+            handle << line + "\"min_ms\": " + std::to_string((double)res.min / 1000000) + "}\n";
             std::cout << "\tmax: " << (double)res.max / 1000000 << " ms\n";
-            handle << line + "\"max ms\":" + std::to_string((double)res.max / 1000000) + "}\n";
+            handle << line + "\"max_ms\": " + std::to_string((double)res.max / 1000000) + "}\n";
             std::cout << "\tavg: " << (double)res.avg / 1000000 << " ms\n";
-            line += "\"avg ms\":" + std::to_string((double)res.avg / 1000000);
+            line += "\"avg_ms\": " + std::to_string((double)res.avg / 1000000);
         }
         line += "}\n";
         handle << line;
@@ -578,10 +578,10 @@ static void handleProcessResult(const Param& param)
     std::string line = "{";
     if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE) {
         std::cout << "\nDMA FPGA read ";
-        line += "\"direction\":\"h2c\",";
+        line += "\"direction\": \"h2c\", ";
     } else if (param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
         std::cout << "\nDMA FPGA write ";
-        line += "\"direction\":\"c2h\",";
+        line += "\"direction\": \"c2h\", ";
     } else {
         std::cout << "\nkernel execution ";
     }
@@ -591,43 +591,43 @@ static void handleProcessResult(const Param& param)
         std::cout << "latency:\n";
     }
     std::cout <<  "\tprocess(es): " << param.processes << std::endl;
-    line += "\"process\":" + std::to_string(param.processes) + ",";
+    line += "\"process\": " + std::to_string(param.processes) + ", ";
     std::cout <<  "\tthread(s) per process: " << param.threads << std::endl;
-    line += "\"thread\":" + std::to_string(param.threads) + ",";
+    line += "\"thread\": " + std::to_string(param.threads) + ", ";
     if (!param.latency) {
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
             param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
             std::cout << "\tbo size: " << param.bo_sz << std::endl;
-            line += "\"bo size\":" + param.bo_sz + ",";
+            line += "\"bo_size\": \"" + param.bo_sz + "\", ";
             std::cout << "\tbandwidth: ";
-            line += "\"bandwidth MB/s\":";
+            line += "\"bandwidth_MB_per_sec\": ";
             std::cout << count * get_value(param.bo_sz) / (max - min) * 1000 << " MB/s (";
             std::cout << count << " transfers in " << (max - min) / 1000000 << " ms)\n";
             line +=  std::to_string(count * get_value(param.bo_sz) / (max - min) * 1000); 
         } else {
             std::cout << "\tqueue length: " << param.bulk << std::endl;
-            line += "\"queue length\":" + std::to_string(param.bulk) + ",";
+            line += "\"queue_length\": " + std::to_string(param.bulk) + ", ";
             std::cout <<  "\tthroughput: " << count *1000000000 / (max - min) << " ops/s (";
             std::cout << count << " executions in " << (max - min)/1000000 << " ms)\n";
-            line += "\"throughput ops/s\": " + std::to_string(count *1000000000 / (max - min));
+            line += "\"throughput_op_per_sec\": " + std::to_string(count *1000000000 / (max - min));
         }
     } else {
         if (param.dir == XCL_BO_SYNC_BO_TO_DEVICE ||
             param.dir == XCL_BO_SYNC_BO_FROM_DEVICE) {
             std::cout << "\tbo size: " << param.bo_sz << std::endl;
-            line += "\"bo size\":" + param.bo_sz + ",";
+            line += "\"bo_size\": \"" + param.bo_sz + "\", ";
         } else {
             std::cout << "\tqueue length: " << param.bulk << std::endl;
-            line += "\"queue length\":" + std::to_string(param.bulk) + ",";
+            line += "\"queue_length\": " + std::to_string(param.bulk) + ", ";
         }
         std::cout << "\tcount: " << count << std::endl;
-        line += "\"count\":" + std::to_string(count) + ",";
+        line += "\"count\": " + std::to_string(count) + ", ";
         std::cout << "\tmin: " << (double)min / 1000000 << " ms\n";
-        handle << line + "\"min ms\":" + std::to_string((double)min / 1000000) + "}\n";
+        handle << line + "\"min_ms\": " + std::to_string((double)min / 1000000) + "}\n";
         std::cout << "\tmax: " << (double)max / 1000000 << " ms\n";
-        handle << line + "\"max ms\":" + std::to_string((double)max / 1000000) + "}\n";
+        handle << line + "\"max_ms\": " + std::to_string((double)max / 1000000) + "}\n";
         std::cout << "\tavg: " << (double)avg / 1000000 << " ms\n";
-        line += "\"avg ms\":" + std::to_string((double)avg / 1000000);
+        line += "\"avg_ms\": " + std::to_string((double)avg / 1000000);
     }
     line += "}\n";
     handle << line;
